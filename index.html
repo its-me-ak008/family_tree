@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Family Tree Builder</title>
+    <meta http-equiv="Cache-Control" content="no-store" />
+    <link rel="stylesheet" href="./styles.css?v=24" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <!-- Right-side drawer. Holds the member form + JSON tools that used to
+           sit permanently beside the tree, so the tree can use the full width. -->
+      <div id="drawerOverlay" class="drawer-overlay" hidden></div>
+
+      <aside
+        id="formDrawer"
+        class="form-drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="formDrawerTitle"
+        aria-hidden="true"
+      >
+        <header class="drawer-header">
+          <div class="drawer-heading">
+            <h1 id="formDrawerTitle">Add Family Member</h1>
+            <p class="drawer-subtitle">Fill in the details and save to update the tree.</p>
+          </div>
+          <button type="button" id="closeDrawerBtn" class="icon-btn drawer-close" aria-label="Close panel">
+            <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+              <path d="M5 5l10 10M15 5L5 15" />
+            </svg>
+          </button>
+        </header>
+
+        <div class="drawer-body">
+          <form id="memberForm" class="member-form">
+            <section class="form-section">
+              <h2 class="form-section-title">Details</h2>
+
+              <div class="field">
+                <label class="field-label" for="memberName">
+                  Name <span class="req" aria-hidden="true">*</span>
+                </label>
+                <input
+                  id="memberName"
+                  name="memberName"
+                  class="control"
+                  type="text"
+                  placeholder="e.g. Ramesh Kumar"
+                  autocomplete="off"
+                  required
+                />
+                <p class="field-hint">Shown on the member card in the tree.</p>
+              </div>
+
+              <div class="field-group">
+                <div class="field">
+                  <label class="field-label" for="memberSex">Sex</label>
+                  <div class="select-wrap">
+                    <select id="memberSex" name="memberSex" class="control">
+                      <option value="male">Male</option>
+                      <option value="female">Female</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="field">
+                  <label class="field-label" for="memberAge">Age</label>
+                  <input
+                    id="memberAge"
+                    name="memberAge"
+                    class="control"
+                    type="number"
+                    min="0"
+                    max="130"
+                    step="1"
+                    inputmode="numeric"
+                    placeholder="e.g. 42"
+                    autocomplete="off"
+                  />
+                  <p class="field-hint">Optional. Shown in the card details popover.</p>
+                </div>
+              </div>
+
+              <div class="field">
+                <label class="check-field" for="memberDeceased">
+                  <input
+                    id="memberDeceased"
+                    name="memberDeceased"
+                    type="checkbox"
+                    class="check-input"
+                  />
+                  <span class="check-label">Deceased</span>
+                </label>
+                <p class="field-hint">Leave unchecked if living. Deceased members appear greyed out in the tree.</p>
+              </div>
+            </section>
+
+            <section class="form-section">
+              <h2 class="form-section-title">Relationships</h2>
+
+              <div class="field">
+                <label class="field-label" for="memberSpouse">Husband / Wife</label>
+                <!-- Multi-select: a member may have more than one spouse
+                     (remarriage). No .select-wrap here — that wrapper draws
+                     the single-select caret, which a list box has no use for. -->
+                <select
+                  id="memberSpouse"
+                  name="memberSpouse"
+                  class="control select-multi"
+                  multiple
+                  size="4"
+                ></select>
+                <p class="field-hint">
+                  Optional. Hold Ctrl / Cmd to select more than one.
+                </p>
+              </div>
+
+              <div class="field-group">
+                <div class="field">
+                  <label class="field-label" for="memberFather">Father</label>
+                  <div class="select-wrap">
+                    <select id="memberFather" name="memberFather" class="control">
+                      <option value="">None</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="field">
+                  <label class="field-label" for="memberMother">Mother</label>
+                  <div class="select-wrap">
+                    <select id="memberMother" name="memberMother" class="control">
+                      <option value="">None</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </form>
+
+          <section class="form-section json-box">
+            <div class="form-section-head">
+              <h2 class="form-section-title">JSON Data</h2>
+              <button type="button" id="copyJsonBtn" class="btn btn-ghost btn-sm">Copy</button>
+            </div>
+            <textarea id="jsonOutput" class="control" spellcheck="false"></textarea>
+            <div class="json-actions">
+              <button type="button" id="applyJsonBtn" class="btn btn-secondary btn-sm">Apply</button>
+              <button type="button" id="exportJsonBtn" class="btn btn-secondary btn-sm">Export</button>
+              <button type="button" id="importJsonBtn" class="btn btn-secondary btn-sm">Import</button>
+              <input id="jsonFileInput" type="file" accept=".json,application/json" hidden />
+            </div>
+            <div class="json-actions">
+              <button type="button" id="saveServerBtn" class="btn btn-primary btn-sm">Save to Server</button>
+              <button type="button" id="loadServerBtn" class="btn btn-secondary btn-sm">Load from Server</button>
+            </div>
+            <div class="json-status-row">
+              <span id="unsavedBadge" class="unsaved-badge hidden" role="status" aria-live="polite">
+                Unsaved changes
+              </span>
+              <p id="serverStatus" class="json-status" role="status" aria-live="polite"></p>
+            </div>
+          </section>
+        </div>
+
+        <!-- Pinned footer: primary action stays reachable without scrolling. -->
+        <footer class="drawer-footer">
+          <button id="cancelEditBtn" type="button" class="btn btn-secondary hidden">Cancel Edit</button>
+          <button id="submitMemberBtn" type="submit" form="memberForm" class="btn btn-primary">
+            Add Family Member
+          </button>
+        </footer>
+      </aside>
+
+      <main class="panel tree-panel">
+        <!-- Canvas control panel. Mirrors the builder's
+             .bfsiComponentBuilder-editorControlPanel: a single flush strip of
+             pill-shaped tool groups separated by a flex spacer, with the zoom
+             group docked in the bar rather than floating over the canvas. -->
+        <div class="tree-toolbar">
+          <div class="tree-toolbar-left">
+            <h2 class="tree-toolbar-title">Family Structure</h2>
+            <input id="memberSearch" class="control search-box" type="search" placeholder="Search family member" aria-label="Search family member" />
+          </div>
+
+          <div class="tree-toolbar-spacer"></div>
+
+          <!-- Structure / data actions -->
+          <div class="tool-group" role="group" aria-label="Tree actions">
+            <button type="button" id="collapseAllBtn" class="tool-btn" title="Collapse all" aria-label="Collapse all">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                <polyline points="4 14 10 14 10 20" />
+                <polyline points="20 10 14 10 14 4" />
+                <path d="M14 10l7-7M3 21l7-7" />
+              </svg>
+            </button>
+            <button type="button" id="expandAllBtn" class="tool-btn" title="Expand all" aria-label="Expand all">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                <polyline points="15 3 21 3 21 9" />
+                <polyline points="9 21 3 21 3 15" />
+                <path d="M21 3l-7 7M3 21l7-7" />
+              </svg>
+            </button>
+            <span class="tool-group__sep" aria-hidden="true"></span>
+            <button type="button" id="resetDataBtn" class="tool-btn tool-btn--danger" title="Clear all data" aria-label="Clear all data">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                <path d="M23 4v6h-6" />
+                <path d="M20.49 15a9 9 0 1 1-2.13-9.36L23 10" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              id="openDrawerBtn"
+              class="tool-btn"
+              title="Add family member"
+              aria-label="Add family member"
+              aria-haspopup="dialog"
+              aria-controls="formDrawer"
+              aria-expanded="false"
+            >
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                <rect x="3" y="3" width="18" height="18" rx="2" />
+                <path d="M12 8v8M8 12h8" />
+              </svg>
+            </button>
+          </div>
+
+          <!-- Zoom group — same order as the builder: Fit, −, value, + -->
+          <div class="tool-group zoom-group" role="group" aria-label="Tree zoom">
+            <button type="button" id="zoomFitBtn" class="tool-btn zoom-fit" title="Fit to screen (Shift+1)" aria-label="Fit to screen">Fit</button>
+            <button type="button" id="zoomOutBtn" class="tool-btn" title="Zoom out (Ctrl+-)" aria-label="Zoom out">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                <path d="M5 12h14" />
+              </svg>
+            </button>
+            <button type="button" id="zoomResetBtn" class="tool-btn zoom-level" title="Reset to 100% (Ctrl+0)" aria-label="Reset zoom">100%</button>
+            <button type="button" id="zoomInBtn" class="tool-btn" title="Zoom in (Ctrl++)" aria-label="Zoom in">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="tree-stage">
+          <div id="treeRoot" class="tree-root">
+            <div id="treeCanvas" class="tree-canvas"></div>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <script src="./app.js?v=25"></script>
+  </body>
+</html>

@@ -1,0 +1,1583 @@
+:root {
+  --bg: #f4f7fb;
+  --panel: #ffffff;
+  --panel-alt: #eef3ff;
+  --primary: #3f6ef2;
+  --primary-hover: #3561db;
+  --primary-active: #2b53bd;
+  --primary-soft: rgba(63, 110, 242, 0.16);
+  --danger: #d92d20;
+  --danger-soft: rgba(217, 45, 32, 0.16);
+  --text: #1e293b;
+  --muted: #64748b;
+  --placeholder: #9aa6b8;
+  --border: #dfe7f5;
+  --border-strong: #c3cfe4;
+
+  /* Spacing + sizing scale shared by every control. */
+  --space-2: 6px;
+  --space-3: 10px;
+  --space-4: 14px;
+  --space-5: 20px;
+  --radius-sm: 8px;
+  /* 30px matches the builder's compact field rhythm (12px text in a
+     4px-radius box) rather than the old 38px marketing-form height. */
+  --control-h: 30px;
+  --male: #4a90e2;
+  --female: #e85d75;
+  --other: #7c6ae6;
+  --shadow: 0 14px 34px rgba(15, 23, 42, 0.08);
+  --connector: #7a4ddb;
+  --connector-width: 2px;
+  --connector-radius: 12px;
+  --connector-gap: 28px;
+  /* Couple-row geometry. These three drive both the layout and the
+     parent->child connector offset (--couple-stem-shift), so the stem can
+     never drift out of alignment with the card it is drawn from. */
+  --card-w: 170px;
+  /* Fixed card height, pinned on .member-card. Needed because a bottom-aligned
+     couple row (one carrying a married-in ancestor stack) has to position the
+     marriage line relative to the card's bottom edge. */
+  --card-h: 36px;
+  --heart-w: 20px;
+  --couple-gap: 18px;
+  /* Vertical drop from the top of a card to the marriage line. Puts the heart
+     and its connecting lines on the card's name row rather than its top edge. */
+  --couple-line-y: 26px;
+  /* Horizontal distance from the couple-row centre to a card's centre:
+     half the heart + the flex gap + half a card. */
+  --couple-stem-shift: calc(var(--heart-w) / 2 + var(--couple-gap) + var(--card-w) / 2);
+
+  /* ---------------------------------------------------------------
+   * Builder form tokens. Mirrored from the builder's style.css so the
+   * drawer form reads as the same control system as the component
+   * forms (createCompForm / compAttrForm / modalBtn).
+   * ------------------------------------------------------------- */
+  --bb-field-bg: #fff;
+  --bb-field-color: #313949;
+  --bb-field-border: #e3e7ee;
+  --bb-field-border-hover: #ced2da;
+  --bb-field-focus: #2f6df6;
+  --bb-label: #647186;
+  --bb-hint: #8794a8;
+  --bb-req: #e05a5a;
+  --bb-section-rule: #e3e8f1;
+  --bb-foot-rule: #e8ecf0;
+  --bb-foot-bg: #fafbfc;
+  --bb-btn-border: #dde1e7;
+  --bb-btn-text: #17181f;
+  --bb-btn-primary: #3b70e3;
+  --bb-btn-primary-hover: #2f62d0;
+  --bb-ghost-text: #2c5fcc;
+  --bb-ghost-bg: #eef3ff;
+  --bb-ghost-border: #c9d8f5;
+  --bb-ghost-bg-hover: #dbe6ff;
+  --bb-ghost-border-hover: #a8c0ef;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: linear-gradient(135deg, #eef5ff 0%, #f8fafc 100%);
+  color: var(--text);
+  font-family: Inter, "Segoe UI", sans-serif;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+/* The tree now owns the whole viewport; the form lives in a drawer. */
+.app-shell {
+  display: block;
+  height: 100vh;
+  padding: 20px;
+}
+
+.panel {
+  background: var(--panel);
+  border-radius: 22px;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+
+/* ---------------------------------------------------------------
+ * Right-side drawer
+ * ------------------------------------------------------------- */
+.drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.38);
+  backdrop-filter: blur(2px);
+  z-index: 40;
+  opacity: 0;
+  transition: opacity 220ms ease;
+}
+
+.drawer-overlay.is-open {
+  opacity: 1;
+}
+
+/* `hidden` must beat the display used above, hence the explicit rule. */
+.drawer-overlay[hidden] {
+  display: none;
+}
+
+.form-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 50;
+  width: min(440px, 100vw);
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  box-shadow: -18px 0 46px rgba(15, 23, 42, 0.18);
+  /* Parked off-screen rather than display:none so it can animate. */
+  transform: translateX(100%);
+  transition: transform 260ms cubic-bezier(0.22, 0.61, 0.36, 1);
+  visibility: hidden;
+}
+
+.form-drawer.is-open {
+  transform: translateX(0);
+  visibility: visible;
+}
+
+/* .bfsiComponentBuilder-rawModal__head — 6px right padding so the 32px
+   close button's own box supplies the remaining inset. */
+.drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px 12px 20px;
+  border-bottom: 1px solid var(--bb-foot-rule);
+  flex: 0 0 auto;
+}
+
+/* .bfsiComponentBuilder-createCompForm__title / __subtitle */
+.drawer-heading h1 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #1f2a3a;
+  line-height: 1.2;
+}
+
+.drawer-subtitle {
+  margin: 3px 0 0;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.4;
+  color: var(--bb-hint);
+}
+
+.drawer-close {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+/* Only the body scrolls, so header and footer stay pinned. */
+/* Builder form padding is 16px/20px (createCompModal). */
+.drawer-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* .bfsiComponentBuilder-compAttrForm__actions / rawModal__foot — the
+   builder tints its pinned footer rather than leaving it panel-white. */
+.drawer-footer {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--bb-foot-rule);
+  background: var(--bb-foot-bg);
+}
+
+/* The floating "Add Member" trigger and the floating zoom controls were both
+   folded into the toolbar's tool groups (see .tool-group / .tool-btn), so the
+   canvas is now free of overlaying chrome — as in the builder. */
+
+/* ---------------------------------------------------------------
+ * Form layout
+ * ------------------------------------------------------------- */
+/* Matches .bfsiComponentBuilder-createCompForm: an 18px-gap column of
+   fields, each field a 6px-gap label-over-control stack. */
+.member-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* Builder sections are separated by a dashed rule rather than a gap
+   (.bfsiComponentBuilder-createCompForm__section). The first section has
+   no rule above it — it already sits under the drawer header. */
+.form-section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.member-form .form-section + .form-section {
+  padding-top: 12px;
+  border-top: 1px dashed var(--bb-section-rule);
+}
+
+/* __lbl metrics: 10px/600/0.04em uppercase in the muted label colour. */
+.form-section-title {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--bb-label);
+}
+
+/* __sectionHead — align-items: flex-start so a wrapping title does not
+   drag the trailing button off the first line. */
+.form-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0; /* lets grid children shrink instead of overflowing */
+}
+
+/* __row2 — the builder pairs related fields in a fixed 1fr 1fr grid. */
+.field-group {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.field-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--bb-label);
+}
+
+.field-label .req {
+  color: var(--bb-req);
+  margin-left: 2px;
+}
+
+/* __hint — explicitly resets text-transform/letter-spacing because hints
+   can render inside a label, which would otherwise uppercase them. */
+.field-hint {
+  display: block;
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.4;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--bb-hint);
+}
+
+/* Checkbox row. The label wraps the input so the text is a click target,
+   and the native control is kept (rather than restyled) so focus and
+   keyboard behaviour stay intact — only the accent colour is themed. */
+.check-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  /* Overrides the uppercase .field-label metrics: this reads as a
+     sentence next to the box, not as a section label. */
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--bb-field-color);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.check-input {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--bb-btn-primary);
+  cursor: pointer;
+}
+
+.check-input:focus-visible {
+  outline: 1px solid var(--bb-btn-primary);
+  outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------
+ * Shared control styling — every input/select/textarea uses .control
+ * so height, radius, border and focus ring stay identical.
+ * ------------------------------------------------------------- */
+/* Mirrors .bfsiComponentBuilder-input/-select/-textarea: a compact 12px
+   control on a 4px radius with a flat 1px border and no focus ring —
+   the builder signals focus by border colour alone. */
+.control {
+  width: 100%;
+  min-height: var(--control-h);
+  border: 1px solid var(--bb-field-border);
+  border-radius: 4px;
+  background: var(--bb-field-bg);
+  padding: 0 8px;
+  color: var(--bb-field-color);
+  font-size: 12px;
+  line-height: 1.4;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+  appearance: none;
+  box-sizing: border-box;
+}
+
+textarea.control {
+  padding: 8px;
+  line-height: 1.5;
+}
+
+.control::placeholder {
+  color: #d7d7d7;
+  opacity: 1;
+}
+
+.control:hover:not(:disabled):not(:focus) {
+  border-color: var(--bb-field-border-hover);
+}
+
+.control:focus {
+  outline: none;
+  border-color: var(--bb-field-focus);
+}
+
+.control:disabled {
+  background: var(--panel-alt);
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+/* Only flag invalid fields after the user has interacted. */
+.control:not(:placeholder-shown):invalid {
+  border-color: var(--danger);
+}
+
+.control:not(:placeholder-shown):invalid:focus {
+  border-color: var(--danger);
+}
+
+/* Native select arrow is replaced with a consistent chevron. */
+.select-wrap {
+  position: relative;
+  display: block;
+}
+
+.select-wrap select.control {
+  padding-right: 28px;
+  cursor: pointer;
+}
+
+/* The builder (.builderBfsi_Dropdown) draws a small solid caret rather
+   than a chevron, inset 10px from the right edge. */
+.select-wrap::after {
+  content: "";
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #707070;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+/* Multi-select list box. `height: auto` overrides the fixed --control-h that
+   .control sets for single-line fields, so the `size` attribute decides how
+   many rows are visible. */
+select.select-multi {
+  height: auto;
+  min-height: 0;
+  padding: 4px;
+  cursor: pointer;
+}
+
+select.select-multi option {
+  padding: 3px 6px;
+  border-radius: 3px;
+}
+
+select.select-multi option:checked {
+  background: var(--bb-ghost-bg);
+  color: var(--bb-ghost-text);
+  font-weight: 500;
+}
+
+input[type="search"].control::-webkit-search-cancel-button {
+  cursor: pointer;
+}
+
+/* ---------------------------------------------------------------
+ * Buttons
+ * ------------------------------------------------------------- */
+/* .bfsiComponentBuilder-modalBtn: 13px/500 on a 6px radius, 7px/16px
+   padding, transitioning background only. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 16px;
+  border: 1px solid var(--bb-btn-border);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--bb-btn-text);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.btn:focus-visible {
+  outline: 1px solid var(--bb-btn-primary);
+  outline-offset: 1px;
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* .bfsiComponentBuilder-BtnSmall */
+.btn-sm {
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: 4px;
+}
+
+.btn-primary {
+  background: var(--bb-btn-primary);
+  color: #fff;
+  border-color: var(--bb-btn-primary);
+}
+
+.btn-primary:hover:not(:disabled),
+.btn-primary:active:not(:disabled) {
+  background: var(--bb-btn-primary-hover);
+  border-color: var(--bb-btn-primary-hover);
+}
+
+.btn-secondary {
+  background: #fff;
+  color: var(--bb-btn-text);
+  border-color: var(--bb-btn-border);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: #f0f1f3;
+}
+
+/* .bfsiComponentBuilder-createCompForm__addBtn — the builder's tinted
+   secondary action, used here for the JSON "Copy" affordance. */
+.btn-ghost {
+  background: var(--bb-ghost-bg);
+  color: var(--bb-ghost-text);
+  border-color: var(--bb-ghost-border);
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: var(--bb-ghost-bg-hover);
+  border-color: var(--bb-ghost-border-hover);
+}
+
+/* .bfsiComponentBuilder-rawModal__x — the builder's modal close control. */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #6b7280;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.icon-btn:hover {
+  background: #f0f1f3;
+  color: var(--bb-btn-text);
+}
+
+.icon-btn:focus-visible {
+  outline: 1px solid var(--bb-btn-primary);
+  outline-offset: 1px;
+}
+
+.icon-btn svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+
+/* ---------------------------------------------------------------
+ * JSON block
+ * ------------------------------------------------------------- */
+/* The JSON block is a sibling of .member-form, not a section inside it,
+   so the dashed `.form-section + .form-section` rule cannot reach it —
+   it carries the same separator explicitly. */
+.json-box {
+  padding-top: 12px;
+  border-top: 1px dashed var(--bb-section-rule);
+}
+
+/* Matches the builder's JSON textarea (bfsiComponentBuilder-textarea on
+   the raw-JSON surface): tinted background, 12px mono, resizable. */
+#jsonOutput {
+  min-height: 170px;
+  max-height: 60vh;
+  resize: vertical;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  color: #2f3a4a;
+  background: #fafbff;
+}
+
+.json-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Server save/load feedback. Collapses to nothing when empty so it does not
+   reserve a blank line before the first action. */
+.json-status {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: right;
+  color: #6b7280;
+  word-break: break-word;
+}
+
+.json-status:empty {
+  display: none;
+}
+
+.json-status[data-tone="ok"] {
+  color: #15803d;
+}
+
+.json-status[data-tone="error"] {
+  color: #b91c1c;
+}
+
+/* Badge on the left, server status on the right. The badge is the only thing
+   that can push this row to a second line, so it keeps its own baseline. */
+.json-status-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Let the status keep the remaining width and stay right-aligned when the
+   badge is hidden. */
+.json-status-row .json-status {
+  margin-left: auto;
+}
+
+/* Amber rather than red: unsaved work is a reminder, not an error. */
+.unsaved-badge {
+  flex: none;
+  padding: 2px 8px;
+  border: 1px solid #fcd34d;
+  border-radius: 999px;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+.hidden {
+  display: none;
+}
+
+/* Column layout so the toolbar keeps its natural height and the stage
+   absorbs every remaining pixel. */
+/* No padding on the panel itself: the control panel is full-bleed (it carries
+   a bottom rule that must meet both edges, like the builder's). Insets are
+   owned by the toolbar and the stage instead. overflow:hidden also clips the
+   bar's square corners to the panel's radius. */
+.tree-panel {
+  padding: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Canvas control panel — modelled on the builder's
+   .bfsiComponentBuilder-editorControlPanel: a flush full-bleed strip with a
+   bottom rule, holding pill-shaped tool groups. Full-bleed (the panel has no
+   padding), so the rule spans edge to edge and the bar sits directly above
+   the canvas with no gutter. */
+.tree-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: #f7f8fb;
+}
+
+.tree-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* Pushes the tool groups to the trailing edge, like the builder's px-fOne. */
+.tree-toolbar-spacer {
+  flex: 1 1 auto;
+}
+
+.tree-toolbar-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+/* ── Tool groups (builder: .bfsiComponentBuilder-canvasToolBar) ──────── */
+.tool-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px;
+  background: #eef1f6;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.tool-group__sep {
+  width: 1px;
+  height: 16px;
+  margin: 0 2px;
+  background: #cfd6e2;
+}
+
+/* builder: .bfsiComponentBuilder-toolBtn */
+.tool-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 21px;
+  min-width: 22px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #334155;
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.12s, color 0.12s;
+}
+
+.tool-btn > svg {
+  display: block;
+}
+
+.tool-btn:hover {
+  background: #dde3ee;
+}
+
+.tool-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--primary-soft);
+}
+
+.tool-btn--danger:hover {
+  background: #fde2e2;
+  color: #c0392b;
+}
+
+.tool-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  background: transparent;
+}
+
+/* Width is capped here; all other styling comes from .control. */
+.search-box {
+  min-width: 220px;
+  max-width: 260px;
+}
+
+/* The stage now owns the horizontal inset the panel used to provide. */
+.tree-stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0; /* allows the flex child to shrink instead of overflowing */
+  display: flex;
+  padding: 0 12px 12px;
+}
+
+.tree-root {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 8px 8px;
+  overscroll-behavior: contain;
+}
+
+/* Load state: the canvas is inert while the API request is in flight. The
+   empty-state block stays at full opacity so its "Loading family data…" copy
+   remains readable; only any already-rendered tree is dimmed. */
+.tree-root.is-loading {
+  pointer-events: none;
+}
+
+.tree-root.is-loading .family-branch {
+  opacity: 0.45;
+  transition: opacity 120ms ease-out;
+}
+
+/* Blank-canvas message. Centred in the stage rather than pinned to the top,
+   since with no data there is nothing else competing for the space. */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 240px;
+  padding: 32px 16px;
+  text-align: center;
+}
+
+.empty-state__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.empty-state__hint {
+  margin: 0;
+  font-size: 13px;
+  color: #64748b;
+}
+
+.tree-root.is-panning {
+  cursor: grabbing;
+  user-select: none;
+}
+
+/* Reserves the SCALED footprint as real layout box so the scroll container
+   can actually reach the whole tree when zoomed past 100%. `transform` never
+   affects layout, so without this the overflow would be clipped. Sized from
+   JS (reserveZoomScrollSpace), mirroring the builder's artboard wrap. */
+.tree-canvas-wrap {
+  min-width: 100%;
+}
+
+/* The element that actually gets scaled. Width stays auto so the
+   scroll container still measures the un-scaled layout correctly.
+   Deliberately NO min-width:100% here: the wrap is sized to the scaled
+   footprint, and a percentage min-width would make the canvas stretch to
+   match it, inflating scrollWidth on every zoom-in (compounding growth). */
+.tree-canvas {
+  /* Translate first, then scale: the offset centres the shrunken tree
+     inside the viewport instead of letting it collapse to the corner. */
+  transform: translate(var(--tree-offset-x, 0px), var(--tree-offset-y, 0px))
+    scale(var(--tree-zoom, 1));
+  transform-origin: 0 0;
+  width: max-content;
+  /* No transform transition: zoom anchoring sets scrollLeft/Top in the same
+     frame as the scale. If the transform lerped while the scroll jumped
+     instantly the two would disagree and the cursor anchor would visibly
+     slide. Pan already needed it off; zoom needs it off for the same reason. */
+}
+
+/* Zoom group — docked in the toolbar (builder:
+   .bfsiComponentBuilder-zoom). Fit / − / value / + inherit .tool-btn; only
+   the two text buttons need sizing overrides. */
+.zoom-fit {
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.zoom-level {
+  min-width: 44px;
+  padding: 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  /* Keeps the bar from twitching as the percentage changes width. */
+  font-variant-numeric: tabular-nums;
+}
+
+.family-branch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  position: relative;
+  padding-top: 10px;
+}
+
+.family-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  position: relative;
+  isolation: isolate;
+}
+
+.couple-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: var(--couple-gap);
+  position: relative;
+}
+
+/* ---------------------------------------------------------------------
+ * Connector anchoring.
+ *
+ * The connectors stay dead-centre on every family-group. Instead of moving
+ * the lines onto the blood member, the COUPLE ROW is nudged sideways so the
+ * blood member's card is what sits at that centre, with the heart and the
+ * married-in partner pushed off to one side.
+ *
+ * Doing it this way (rather than offsetting each connector) keeps the stem,
+ * the sibling bus and the child drops on a single shared axis, so they all
+ * continue to meet exactly — including the single-child case, where there is
+ * no horizontal bus segment available to absorb a mismatch.
+ *
+ * The nudge uses MARGIN, not transform: margin participates in layout, so the
+ * group reserves the extra width and neighbouring branches are pushed clear
+ * instead of being overlapped.
+ * ------------------------------------------------------------------- */
+.couple-row {
+  /* Distance from the couple-row's own centre to the blood member's card
+     (--anchor-offset) and to the point the stem drops from (--stem-offset).
+     Both are computed in JS from the real row layout, because a row may now
+     hold any number of cards and hearts once a member has several spouses.
+     0 for a lone member. */
+  --anchor-offset: 0px;
+  --stem-offset: 0px;
+}
+
+/* Shift the row so the blood member's card sits on the group's centre line.
+ *
+ * MARGIN, not transform: margin participates in layout, so the group reserves
+ * the extra width and neighbouring branches are pushed clear instead of being
+ * overlapped.
+ *
+ * A centred box moves by (margin-left - margin-right) / 2, so shifting by
+ * -anchor-offset needs 2x the offset on ONE side. max() picks the side
+ * without needing to branch on the sign: whichever term is negative collapses
+ * to 0. Padding the side the row grows into is also what reserves the width. */
+.couple-row.is-anchored {
+  margin-left: max(0px, calc(-2 * var(--anchor-offset)));
+  margin-right: max(0px, calc(2 * var(--anchor-offset)));
+}
+
+/* Outgoing stem: from the bottom of the blood member down to the bus.
+   The margin above has already put that card on the group's centre line, so
+   this offset only undoes the row's own re-centring. */
+.couple-row.has-children::after {
+  content: "";
+  position: absolute;
+  left: calc(50% + var(--stem-offset));
+  top: 100%;
+  width: 0;
+  height: calc(var(--connector-gap) / 2);
+  border-left: var(--connector-width) solid var(--connector);
+  transform: translateX(-50%);
+}
+
+/* ---------------------------------------------------------------------
+ * Per-marriage stems.
+ *
+ * A row can hold several marriages, and their children are NOT siblings —
+ * each set belongs to one specific couple. A single shared trunk cannot say
+ * that, so every marriage drops its OWN stem from its OWN heart, and the
+ * stems all land on the same sibling bus. Adding a spouse therefore adds a
+ * stem instead of moving the existing one.
+ *
+ * Drawn as real elements rather than ::after because there may now be more
+ * than one of them; the single-stem ::after above is kept for the inline
+ * ancestor rows, which always have exactly one. */
+.couple-row.has-stems::after {
+  display: none;
+}
+
+.couple-stem {
+  content: "";
+  position: absolute;
+  left: calc(50% + var(--stem-x, 0px));
+  top: 100%;
+  width: 0;
+  height: calc(var(--connector-gap) / 2);
+  border-left: var(--connector-width) solid var(--connector);
+  transform: translateX(-50%);
+}
+
+/* ---------------------------------------------------------------------
+ * Which child belongs to which couple.
+ *
+ * Once a row holds more than one marriage, the stem alone cannot be followed
+ * by eye — several lines land on one bus. Each marriage is therefore tinted,
+ * and its heart, its stem and its children's branch lines all carry the same
+ * tint, so a child can be traced back to the exact couple it came from.
+ *
+ * Applied as CLASSES rather than an inherited custom property: a tint set on
+ * a .child-branch would otherwise cascade into every nested branch further
+ * down the subtree and mis-colour unrelated generations. --tint is only ever
+ * read by an element that sets it itself. */
+/* Palette: six hues spaced EXACTLY 60 degrees apart around the wheel, so even
+   a row that uses all six still has no weak pair. The old palette held two
+   violets (#7a4ddb / #9333ea) and two oranges (#d97706 / #c2410c) that were
+   indistinguishable at the 2px width a branch line is actually drawn at.
+   A later hand-picked hex set still left teal and blue only 45 degrees apart.
+   Declaring the hues in hsl() makes the spacing exact and verifiable instead
+   of approximated by eye from hex values.
+
+   Lightness is tuned per hue, not shared: at equal lightness the lime and
+   orange read far paler than the blue and violet, which would make some
+   branches look faded rather than merely different. Every tint stays dark
+   enough to hold contrast against the white canvas as a thin line.
+
+   Hue values are mirrored by TINT_HUES in app.js, which uses them to keep the
+   marriages within a single row as far apart in colour as possible. */
+.couple-tint-1 { --tint: hsl(265 68% 48%); } /* violet */
+.couple-tint-2 { --tint: hsl(205 88% 38%); } /* blue   */
+.couple-tint-3 { --tint: hsl(145 72% 30%); } /* green  */
+.couple-tint-4 { --tint: hsl(85 70% 30%);  } /* olive  */
+.couple-tint-5 { --tint: hsl(25 88% 44%);  } /* orange */
+.couple-tint-6 { --tint: hsl(325 72% 44%); } /* pink   */
+
+.couple-stem[class*="couple-tint-"] {
+  border-left-color: var(--tint);
+}
+
+.child-branch[class*="couple-tint-"]::before,
+.child-branch[class*="couple-tint-"]::after {
+  border-color: var(--tint);
+}
+
+/* The arrowhead landing on the child belongs to the same line, so it takes
+   the tint too. The `>` keeps this to the branch's OWN row — a descendant
+   selector would re-colour every nested generation below it. */
+.child-branch[class*="couple-tint-"] > .couple-row::before {
+  border-top-color: var(--tint);
+}
+
+/* The heart keeps its shape and only takes the tint on its ring and glyph,
+   so the marriage link still reads as a heart rather than as a legend chip. */
+.couple-heart[class*="couple-tint-"] {
+  color: var(--tint);
+  box-shadow: inset 0 0 0 1px var(--tint);
+}
+
+/* Incoming arrowhead, landing on the blood member's card. The INCOMING line
+   always targets the card, never the heart, so it uses --anchor-offset. */
+.child-branch > .couple-row::before {
+  content: "";
+  position: absolute;
+  left: calc(50% + var(--anchor-offset));
+  top: calc(-1 * var(--connector-width));
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 8px solid var(--connector);
+  transform: translateX(-50%);
+  z-index: 2;
+}
+
+/* ---------------------------------------------------------------------
+ * Marriage link.
+ *
+ * The heart is a small badge sitting ON the line that joins the two cards,
+ * rather than a large disc filling the gap between them. The line is drawn
+ * by the heart's own two pseudo-elements, each spanning the flex gap out to
+ * the neighbouring card edge, so the link reads as one continuous rule with
+ * the heart threaded onto its middle.
+ *
+ * The badge is pulled down to --couple-line-y so the rule crosses the cards
+ * at their name row; cards are top-aligned, so without this the line would
+ * cling to their top edge.
+ * ------------------------------------------------------------------- */
+.couple-heart {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--heart-w);
+  height: var(--heart-w);
+  flex: 0 0 var(--heart-w);
+  margin-top: calc(var(--couple-line-y) - var(--heart-w) / 2);
+  border-radius: 50%;
+  background: #fff;
+  color: #e85d75;
+  font-size: 0.68rem;
+  line-height: 1;
+  font-weight: 700;
+  box-shadow: inset 0 0 0 1px rgba(232, 93, 117, 0.35);
+  position: relative;
+  z-index: 1;
+}
+
+/* The two halves of the marriage line. Each reaches from the badge across
+   the flex gap to the adjoining card. Slight overlap (1px) past the gap
+   avoids a hairline seam at fractional zoom levels. */
+.couple-heart::before,
+.couple-heart::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: calc(var(--couple-gap) + 1px);
+  border-top: var(--connector-width) solid var(--connector);
+  transform: translateY(-50%);
+}
+
+.couple-heart[class*="couple-tint-"]::before,
+.couple-heart[class*="couple-tint-"]::after {
+  border-top-color: var(--tint);
+}
+
+.couple-heart::before {
+  right: 100%;
+}
+
+.couple-heart::after {
+  left: 100%;
+}
+
+/* -------------------------------------------------------------------
+ * Married-in ancestors
+ *
+ * When both partners have parents, one side keeps the descending lineage and
+ * the other side's parents are stacked directly ABOVE that partner's card,
+ * inside the same couple row. One tree, with the second family marrying into
+ * it at the exact point the marriage happens — rather than a second tree
+ * growing alongside and duplicating everything below the couple.
+ * ------------------------------------------------------------------- */
+/* The column is pinned to EXACTLY one card width, and the stack above it is
+   allowed to overflow sideways.
+
+   This is the rule that keeps a couple row intact. The stack is a whole
+   couple row of its own and is routinely 3-4x wider than a card; if the
+   column were allowed to size to its contents, that width would become the
+   married-in partner's flex slot. The partner's card is centred in that slot,
+   so the heart — which sits at the slot's EDGE — ends up hundreds of pixels
+   away from the card it marries, with only an 18px marriage line reaching
+   out towards it. The branch looks severed even though the DOM is correct.
+
+   Fixing the slot at --card-w makes the card and the heart neighbours again,
+   and restores the premise every slot-counting offset in app.js depends on:
+   one slot, one card width. Height is still contributed normally, so the
+   stack reserves its vertical room; only the horizontal overflow is taken
+   out of layout, and reserveInlineAncestorSpace() pays for that by widening
+   the enclosing group. */
+.member-with-ancestors {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  width: var(--card-w);
+  flex: 0 0 var(--card-w);
+}
+
+.inline-ancestors {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* Room for the stem dropping into the card below. */
+  margin-bottom: var(--connector-gap);
+  /* Overflows the --card-w column symmetrically about the card below, rather
+     than being squeezed into it. */
+  flex: 0 0 auto;
+  max-width: none;
+}
+
+/* The stem spans the whole gap here, unlike the half-gap used between
+   generations where a sibling bus takes up the other half. */
+.inline-ancestor-row.has-children::after {
+  height: var(--connector-gap);
+}
+
+
+/* Cards in a row carrying an ancestor stack must line up on their BOTTOM
+   edge: the stack makes one side taller, and top-alignment would leave the
+   married-in partner floating below their spouse. */
+.couple-row.has-inline-ancestors {
+  align-items: flex-end;
+}
+
+/* With the row bottom-aligned, the marriage line is measured up from the
+   card's bottom edge instead of down from its top, so the heart stays on the
+   name row of both cards.
+   The offset is the heart's own height plus the stack above the card, so it
+   is set per row in JS: .member-with-ancestors is as tall as its stack, which
+   is only knowable after layout. */
+.couple-row.has-inline-ancestors .couple-heart {
+  margin-top: 0;
+  margin-bottom: calc(var(--card-h) - var(--couple-line-y) - var(--heart-w) / 2);
+}
+
+.member-card {
+  width: var(--card-w);
+  /* Height is a token rather than content-driven so bottom-aligned rows can
+     compute the marriage-line position. The single name row already sits at
+     exactly this height (8px + 20px icon + 8px). */
+  height: var(--card-h);
+  box-sizing: border-box;
+  background: #fff;
+  border: 1px solid #dfe5ea;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+  position: relative;
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.member-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 16px rgba(15, 23, 42, 0.06);
+}
+
+.children-row {
+  --col-gap: 28px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  flex-wrap: nowrap;
+  gap: var(--col-gap);
+  position: relative;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 auto;
+  /* vertical space occupied by the parent stem */
+  padding-top: calc(var(--connector-gap) / 2);
+}
+
+.child-branch {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* vertical space occupied by the bus + drop into this child */
+  padding-top: calc(var(--connector-gap) / 2);
+}
+
+/* Left half of the horizontal sibling bus. */
+.child-branch::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 50%;
+  width: calc(50% + var(--col-gap) / 2);
+  height: calc(var(--connector-gap) / 2);
+  border-top: var(--connector-width) solid var(--connector);
+}
+
+/* Right half of the bus + the vertical drop into this child. */
+.child-branch::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: calc(50% + var(--col-gap) / 2);
+  height: calc(var(--connector-gap) / 2);
+  border-top: var(--connector-width) solid var(--connector);
+  border-left: var(--connector-width) solid var(--connector);
+}
+
+/* First child: bus starts here, elbow curves right. */
+.child-branch:first-child::before {
+  display: none;
+}
+
+.child-branch:first-child::after {
+  border-top-left-radius: var(--connector-radius);
+}
+
+/* Last child: bus ends here, elbow curves down. */
+.child-branch:last-child::before {
+  border-right: var(--connector-width) solid var(--connector);
+  border-top-right-radius: var(--connector-radius);
+}
+
+.child-branch:last-child::after {
+  display: none;
+}
+
+/* ---------------------------------------------------------------------
+ * One bus per marriage.
+ *
+ * The sibling bus is a statement that the children it joins share parents.
+ * When a row holds two marriages, their children are only half-siblings, so
+ * a single bus running across the whole row would join two groups that are
+ * not siblings at all. The bus is therefore CUT at every group boundary:
+ * each marriage gets its own bus, fed by its own stem.
+ *
+ * The children of one marriage are kept contiguous by the ordering in
+ * renderFamilyGroup(), so a group is always an unbroken run and these
+ * first/last rules are enough to split it. */
+.child-branch.group-start::before {
+  display: none;
+}
+
+.child-branch.group-start::after {
+  border-top-left-radius: var(--connector-radius);
+}
+
+.child-branch.group-end::after {
+  display: none;
+}
+
+.child-branch.group-end::before {
+  border-right: var(--connector-width) solid var(--connector);
+  border-top-right-radius: var(--connector-radius);
+}
+
+/* Sole child of its marriage: a straight drop, exactly like an only child.
+   Both bus halves are suppressed, so without this the child would have no
+   connector at all. */
+.child-branch.group-solo::before {
+  display: none;
+}
+
+.child-branch.group-solo::after {
+  display: block;
+  left: 50%;
+  width: 0;
+  border-top: none;
+  border-radius: 0;
+  transform: translateX(calc(-1 * var(--connector-width) / 2));
+}
+
+/* Horizontal run joining a stem to its own bus, used when the heart does not
+   sit directly above that marriage's children (an off-centre marriage, or a
+   group of one). Sized in JS from the real layout, since the distance depends
+   on where the children actually landed. */
+.couple-stem__jog {
+  position: absolute;
+  top: 100%;
+  height: 0;
+  border-top: var(--connector-width) solid var(--connector);
+}
+
+.couple-stem[class*="couple-tint-"] .couple-stem__jog {
+  border-top-color: var(--tint);
+}
+
+/* Only child: a single straight drop, no bus.
+ *
+ * The `>` is load-bearing. As a descendant selector this also matched every
+ * .child-branch nested DEEPER inside the only child's own subtree, stripping
+ * the sibling bus off real sibling groups further down the tree. It only
+ * showed up once a generation was added ABOVE an existing couple (e.g. "add
+ * father"), because that is what first wraps a multi-child row inside a
+ * single-child row. Must stay a child combinator. */
+.children-row.single-child > .child-branch::before {
+  display: none;
+}
+
+.children-row.single-child > .child-branch::after {
+  display: block;
+  left: 50%;
+  width: 0;
+  border-top: none;
+  border-radius: 0;
+  transform: translateX(calc(-1 * var(--connector-width) / 2));
+}
+
+.member-node {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 180px;
+}
+
+/* Single name row: the tinted header band, meta body and button strip are
+   gone, so the card is one line of content. */
+.member-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 8px 8px 11px;
+}
+
+.member-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.82rem;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Sex is now carried by the name colour alone, since the coloured header
+   band that used to encode it has been removed. */
+.member-card.male .member-name {
+  color: var(--male);
+}
+
+.member-card.female .member-name {
+  color: var(--female);
+}
+
+.member-card.other .member-name {
+  color: var(--other);
+}
+
+/* ---------------------------------------------------------------
+ * Deceased members
+ *
+ * Declared after the sex colour rules so it wins on equal specificity
+ * (.member-card.is-deceased .member-name vs .member-card.male .member-name).
+ * The card is desaturated rather than faded with `opacity`, because opacity
+ * would also dim the info/menu icons and make them look disabled.
+ * ------------------------------------------------------------- */
+.member-card.is-deceased {
+  background: #f6f7f9;
+  border-color: #dcdfe4;
+  box-shadow: none;
+}
+
+.member-card.is-deceased .member-name {
+  color: #8a9199;
+  font-weight: 600;
+}
+
+/* The name stays grey on hover too — the colour is a status, not a state. */
+.member-card.is-deceased:hover {
+  box-shadow: 0 8px 16px rgba(15, 23, 42, 0.05);
+}
+
+.member-tools {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+
+.member-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.member-icon-btn:hover {
+  background: #eef2f8;
+  color: var(--text);
+}
+
+.member-icon-btn[aria-expanded="true"] {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.member-icon-btn:focus-visible {
+  outline: 1px solid var(--primary);
+  outline-offset: 1px;
+}
+
+/* ---------------------------------------------------------------
+ * Floating layer: info popover + action menu
+ *
+ * Both are appended to <body>, not to the card. .tree-canvas is
+ * `transform: scale()`d by the zoom controls, so anything inside it
+ * would be scaled too; these are positioned in viewport pixels by
+ * positionFloat() and therefore stay a fixed, legible size at any zoom.
+ * ------------------------------------------------------------- */
+.member-pop {
+  position: fixed;
+  z-index: 60;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.16);
+  font-size: 0.74rem;
+  color: var(--text);
+}
+
+.member-pop--info {
+  width: 212px;
+  padding: 10px 12px;
+}
+
+.member-pop__title {
+  font-weight: 700;
+  font-size: 0.78rem;
+  margin-bottom: 7px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--bb-section-rule);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Label/value grid. `dd` needs its default indent cleared. */
+.member-pop__list {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 5px 10px;
+  margin: 0;
+}
+
+.member-pop__list dt {
+  font-size: 0.64rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--bb-label);
+  padding-top: 1px;
+}
+
+.member-pop__list dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.member-pop__list .is-empty {
+  color: var(--placeholder);
+}
+
+.member-menu {
+  min-width: 142px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+}
+
+.member-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.74rem;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.member-menu__item svg {
+  flex: none;
+  color: var(--muted);
+}
+
+.member-menu__item:hover,
+.member-menu__item:focus-visible {
+  background: #eef2f8;
+  outline: none;
+}
+
+.member-menu__item.is-danger {
+  color: var(--danger);
+}
+
+.member-menu__item.is-danger svg {
+  color: var(--danger);
+}
+
+.member-menu__item.is-danger:hover,
+.member-menu__item.is-danger:focus-visible {
+  background: #fde2e2;
+}
+
+@media (max-width: 980px) {
+  .app-shell {
+    padding: 12px;
+  }
+
+  .tree-toolbar {
+    /* Lets the groups wrap below the title instead of crushing the search
+       box, now that everything shares one row. */
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 6px 8px;
+  }
+
+  /* The spacer would force a wrap after the title on its own line. */
+  .tree-toolbar-spacer {
+    display: none;
+  }
+
+  .tree-stage {
+    padding: 0 8px 8px;
+  }
+
+  .search-box {
+    min-width: 140px;
+  }
+
+  /* The builder's __row2 is a fixed 1fr 1fr because it lives in a
+     360px flyout. The drawer goes full-width on small screens, where
+     two columns would crush the Parent selects. */
+  .field-group {
+    grid-template-columns: 1fr;
+  }
+}
