@@ -957,9 +957,11 @@ input[type="search"].control::-webkit-search-cancel-button {
   content: "";
   position: absolute;
   left: calc(50% + var(--stem-x, 0px));
-  top: 100%;
+  /* --stem-lift (set in JS) raises the top to the heart's lower edge, so the
+     stem starts AT the heart rather than at the row's bottom edge. */
+  top: calc(100% - var(--stem-lift, 0px));
   width: 0;
-  height: calc(var(--connector-gap) / 2);
+  height: calc(var(--connector-gap) / 2 + var(--stem-lift, 0px));
   border-left: var(--connector-width) solid var(--connector);
   transform: translateX(-50%);
 }
@@ -1142,6 +1144,28 @@ input[type="search"].control::-webkit-search-cancel-button {
   max-width: none;
 }
 
+/* Grow the stack away from the spouse only, so it never covers the spouse's
+   card or the line coming down into it. Flex overflow follows alignment:
+   flex-end overflows to the left, flex-start to the right. */
+/* Both parents of an inline row have known ancestors: their stacks sit side
+   by side, each above its own parent. */
+.inline-ancestor-pair {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-end;
+  gap: var(--couple-gap, 24px);
+}
+
+.member-with-ancestors.grow-left,
+.member-with-ancestors.grow-left .inline-ancestors {
+  align-items: flex-end;
+}
+
+.member-with-ancestors.grow-right,
+.member-with-ancestors.grow-right .inline-ancestors {
+  align-items: flex-start;
+}
+
 /* The stem spans the whole gap here, unlike the half-gap used between
    generations where a sibling bus takes up the other half. */
 .inline-ancestor-row.has-children::after {
@@ -1154,6 +1178,28 @@ input[type="search"].control::-webkit-search-cancel-button {
    married-in partner floating below their spouse. */
 .couple-row.has-inline-ancestors {
   align-items: flex-end;
+}
+
+/* Bottom alignment pushes the blood member's card far below the row's top
+   edge, where the incoming line arrives. This segment (sized in JS by
+   extendIncomingDrops) carries the line down, and the arrowhead follows it,
+   so the parents point at their real child rather than at the stack beside it. */
+.child-branch > .couple-row.has-inline-ancestors::before {
+  top: calc(var(--incoming-drop, 0px) - var(--connector-width) - 8px);
+}
+
+.incoming-drop {
+  position: absolute;
+  left: calc(50% + var(--anchor-offset));
+  top: 0;
+  width: 0;
+  border-left: var(--connector-width) solid var(--connector);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.child-branch[class*="couple-tint-"] > .couple-row > .incoming-drop {
+  border-left-color: var(--tint);
 }
 
 /* With the row bottom-aligned, the marriage line is measured up from the
@@ -1580,4 +1626,86 @@ input[type="search"].control::-webkit-search-cancel-button {
   .field-group {
     grid-template-columns: 1fr;
   }
+}
+
+/* ---------------------------------------------------------------------
+ * Measured branch connectors (drawn by drawBranchConnectors in app.js).
+ *
+ * The stem, sibling bus, per-child drops and arrowheads are one SVG per
+ * family-group, computed from the real positions of the heart and every
+ * child card, so they always join regardless of how many children there
+ * are or how wide each child's subtree is. The older CSS pseudo-element
+ * pieces are hidden so nothing is drawn twice.
+ * ------------------------------------------------------------------- */
+.branch-lines {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Click target for a branch: the SVG itself ignores the mouse so cards stay
+   clickable, but each branch group accepts clicks on its wide hit stroke. */
+.branch-path {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.branch-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 12px;
+  pointer-events: stroke;
+}
+
+.branch-path:hover path:not(.branch-hit) {
+  stroke-width: 3.5px;
+}
+
+/* Isolated view: everything fades except the clicked branch and its cards. */
+.branch-isolated .member-card,
+.branch-isolated .couple-heart,
+.branch-isolated .branch-path {
+  opacity: 0.12;
+  transition: opacity 0.15s ease;
+}
+
+.branch-isolated .branch-path.branch-focus,
+.branch-isolated .member-card.branch-focus,
+.branch-isolated .couple-heart.branch-focus {
+  opacity: 1;
+}
+
+.branch-isolated .branch-path.branch-focus path:not(.branch-hit) {
+  stroke-width: 3px;
+}
+
+.couple-row.has-stems > .couple-stem,
+.child-branch::before,
+.child-branch::after,
+.child-branch > .couple-row::before,
+.child-branch > .couple-row > .incoming-drop,
+.inline-ancestor-row.has-children::after {
+  display: none !important;
+}
+
+/* Siblings of a married-in partner, drawn beside them. */
+.inline-sibling {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: center;
+  margin-left: 30px;
+  margin-right: 30px;
+}
+
+/* Clear spacing so every branch and drop can be followed by eye. */
+.children-row {
+  --col-gap: 48px;
+  padding-top: 20px;
+}
+
+.child-branch {
+  padding-top: 20px;
 }

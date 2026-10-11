@@ -161,6 +161,18 @@ function getSpouses(member) {
   return getSpouseIds(member).map((id) => getMemberById(id)).filter(Boolean);
 }
 
+/**
+ * Every child with two known parents implies those parents are a couple.
+ * Linking them guarantees they render side by side with a heart, so the
+ * child's line drops from that heart instead of from one parent's card.
+ */
+function linkCoParents() {
+  state.members.forEach((child) => {
+    const parents = child.parentIds.filter((id) => getMemberById(id));
+    if (parents.length === 2) linkSpouse(parents[0], parents[1]);
+  });
+}
+
 function isMarriedTo(member, otherId) {
   return getSpouseIds(member).includes(otherId);
 }
@@ -390,6 +402,13 @@ function computeInlineAncestors() {
     withParents
       .filter((person) => person.id !== owner.id)
       .forEach((marriedIn) => {
+        /* Both partners descend from the SAME tree (e.g. cousins): the
+           married-in side's parents are already drawn in the main lineage,
+           so there is nothing to stack inline. Their line is drawn as a
+           cross-link from that parents' heart instead (see
+           renderFamilyGroup / drawBranchConnectors). */
+        const ownParents = marriedIn.parentIds.filter((id) => getMemberById(id));
+        if (ownParents.every((id) => ownerAncestors.has(id))) return;
         inlineAncestorFor.add(marriedIn.id);
         // Only ancestors exclusive to the married-in side move inline;
         // anything shared with the owner's line stays in the main tree.
@@ -713,7 +732,12 @@ function updateTree() {
      the stems have to be in their final positions before it is computed. */
   reserveInlineAncestorSpace();
   alignCoupleAnchors();
-  alignCoupleStems();
+  /* Anchoring shifts rows inside a stack with margins, which widens the
+     stack AFTER its overflow was reserved. Reserve again so neighbouring
+     branches are pushed clear of the stack's final width. */
+  reserveInlineAncestorSpace();
+  extendIncomingDrops();
+  drawBranchConnectors();
   // Content size changed, so the centring offset must be recomputed.
   applyCentering();
 }
@@ -1250,7 +1274,24 @@ function groupChildrenByMarriage(layout, children, bloodId) {
     groups.push({ slotIndex: index, key: [...slot.between].sort().join('+'), children: members });
   });
 
-  const rest = children.filter((child) => !claimed.has(child.id));
+  let rest = children.filter((child) => !claimed.has(child.id));
+
+  /* A child recorded with only ONE parent, whose parent has exactly one
+     spouse, is still drawn from that marriage's heart — a line leaving the
+     card beside a heart reads as a broken connection. */
+  const blood = getMemberById(bloodId);
+  const ownHearts = layout
+    .map((slot, index) => ({ slot, index }))
+    .filter(({ slot }) => slot.type === 'heart' && slot.between.includes(bloodId));
+  if (rest.length && blood && getSpouseIds(blood).length === 1 && ownHearts.length === 1) {
+    const { slot, index } = ownHearts[0];
+    const key = [...slot.between].sort().join('+');
+    const existing = groups.find((group) => group.key === key);
+    if (existing) existing.children.push(...rest);
+    else groups.push({ slotIndex: index, key, children: rest });
+    rest = [];
+  }
+
   if (rest.length) {
     const cardIndex = layout.findIndex((slot) => slot.type === 'card' && slot.id === bloodId);
     groups.push({ slotIndex: cardIndex, key: `solo:${bloodId}`, children: rest });
@@ -1301,20 +1342,46 @@ function getSlotOffset(layout, targetIndex) {
  * rendered at this point in the tree rather than as a separate root, so the
  * pair below them is never duplicated.
  */
-function renderInlineAncestors(member) {
+function renderInlineAncestors(member, side = 'right') {
   const { father, mother } = getParentsBySex(member);
   const parents = [father, mother].filter(Boolean);
   if (!parents.length) return null;
+  /* Once-only rule: when two lines share ancestors (e.g. both partners
+     descend from the same grandparents), the shared couple is drawn by
+     whichever stack reaches it first; every later path stops here instead
+     of painting a duplicate copy. */
+  if (parents.some((parent) => renderedMemberIds.has(parent.id))) return null;
+  // Claimed before recursing so a deeper path cannot loop back and redraw them.
+  parents.forEach((parent) => renderedMemberIds.add(parent.id));
 
   const stack = document.createElement('div');
   stack.className = 'inline-ancestors';
 
   // Grandparents and beyond continue upward recursively, so a married-in
-  // side with several generations stays fully visible.
-  const grandStack = parents
-    .map((parent) => renderInlineAncestors(parent))
-    .find(Boolean);
-  if (grandStack) stack.appendChild(grandStack);
+  // side with several generations stays fully visible. `side` is the
+  // direction AWAY from the main lineage; every level grows that way so a
+  // married-in family never reaches back across the blood line's connectors.
+  // Evaluated lazily: only ONE grand stack is displayed, so rendering the
+  // others would claim their members as drawn while discarding the cards.
+  /* BOTH parents' ancestries are drawn (e.g. Nagarajan's parents AND
+     Geetha's parents). Each grand stack sits above its own parent: the
+     lineage parent (moved to the outward end below) gets the outward slot,
+     the other parent's stack sits on the inward side. */
+  const grandStacks = [];
+  for (const parent of parents) {
+    const gs = renderInlineAncestors(parent, side);
+    if (gs) grandStacks.push({ parent, gs });
+  }
+  const grandStack = grandStacks.length ? grandStacks[0].gs : null;
+  if (grandStacks.length === 1) {
+    stack.appendChild(grandStack);
+  } else if (grandStacks.length > 1) {
+    const pair = document.createElement('div');
+    pair.className = 'inline-ancestor-pair';
+    const ordered = side === 'right' ? [...grandStacks].reverse() : grandStacks;
+    ordered.forEach(({ gs }) => pair.appendChild(gs));
+    stack.appendChild(pair);
+  }
 
   const row = document.createElement('div');
   row.className = 'couple-row inline-ancestor-row has-children';
@@ -1339,11 +1406,29 @@ function renderInlineAncestors(member) {
     getCoupleMembers(parent.id).forEach((person) => {
       if (seen.has(person.id)) return;
       const isBloodParent = parents.some((item) => item.id === person.id);
-      if (!isBloodParent && person.childIds.length) return;
+      /* A partner moved inline by computeInlineAncestors() is barred from
+         being a root, so this row is the ONLY place they can be drawn —
+         they must be included even if they have children (e.g. a second
+         wife whose child sits in the sibling slots). Only partners that
+         still render through their own branch are left out. */
+      if (!isBloodParent && person.childIds.length && !inlineAncestorIds.has(person.id)) return;
       seen.add(person.id);
       rowMembers.push(person);
     });
   });
+
+  /* A parent whose own parents are drawn in the grand stack above may have
+     brothers/sisters too (e.g. an aunt). They are only reachable through that
+     stack, so they are drawn here beside that parent — on the OUTWARD side,
+     and that parent is moved to the outward end of the couple. Placing them
+     inward would make their parents' bus cut across the main lineage's lines. */
+  const lineageParent = grandStack
+    ? parents.find((parent) => parent.parentIds.some((id) => getMemberById(id)))
+    : null;
+  if (lineageParent && rowMembers.length === 2) {
+    const other = rowMembers.find((person) => person.id !== lineageParent.id);
+    rowMembers.splice(0, 2, ...(side === 'right' ? [other, lineageParent] : [lineageParent, other]));
+  }
 
   // These cards are real renderings of real members, so they count towards
   // the once-only rule just like any other card.
@@ -1359,6 +1444,8 @@ function renderInlineAncestors(member) {
     ? parents.map((parent) => parent.id).sort().join('+')
     : `solo:${parents[0].id}`;
   row.dataset.anchorKey = stemAnchorKey;
+  // The child this stack belongs to; drawInlineConnectors() drops onto it.
+  row.dataset.childId = member.id;
   const inlineLayout = buildCoupleLayout(rowMembers);
   const inlineAnchorIndex = findAnchorSlotIndex(inlineLayout, stemAnchorKey);
   if (inlineAnchorIndex > -1) {
@@ -1370,10 +1457,58 @@ function renderInlineAncestors(member) {
   // Hearts are emitted only between ADJACENT people who are really married,
   // so a three-card row never implies a marriage between two partners that
   // merely sit next to each other — nor between mere co-parents.
-  appendCoupleCards(row, rowMembers, renderMemberCard);
+  /* Siblings are drawn for EVERY parent whose own parents are in a grand
+     stack above (e.g. Nagarajan's siblings AND Geetha's siblings). Each set
+     goes on that parent's outer side, away from the partner. */
+  const stackParentIds = new Set(grandStacks.map(({ parent }) => parent.id));
+  appendCoupleCards(row, rowMembers, (person) => {
+    const card = renderMemberCard(person);
+    if (!stackParentIds.has(person.id)) return card;
+    const siblings = renderInlineSiblings(person);
+    if (!siblings.length) return card;
+    const fragment = document.createDocumentFragment();
+    const isLineage = lineageParent && person.id === lineageParent.id;
+    const pos = rowMembers.findIndex((item) => item.id === person.id);
+    const siblingsLeft = rowMembers.length === 2 && !isLineage
+      ? pos === 0
+      : side === 'left';
+    if (siblingsLeft) {
+      siblings.forEach((slot) => fragment.appendChild(slot));
+      fragment.appendChild(card);
+    } else {
+      fragment.appendChild(card);
+      siblings.forEach((slot) => fragment.appendChild(slot));
+    }
+    return fragment;
+  });
 
   stack.appendChild(row);
   return stack;
+}
+
+/**
+ * Other children of a married-in partner's parents, each rendered as a full
+ * branch (with their own spouse and children) in a slot beside that partner.
+ */
+function renderInlineSiblings(member) {
+  const parentIds = member.parentIds.filter((id) => getMemberById(id));
+  if (!parentIds.length) return [];
+
+  return getDirectChildrenForParentSet(parentIds)
+    .filter((child) => child.id !== member.id
+      && !renderedMemberIds.has(child.id)
+      // A sibling who married into another lineage is drawn there instead.
+      && !inlineAncestorFor.has(child.id))
+    .map((child) => {
+      const group = renderFamilyGroup(child);
+      if (!group.childElementCount) return null;
+      const slot = document.createElement('div');
+      slot.className = 'inline-sibling';
+      slot.dataset.siblingOf = member.id;
+      slot.appendChild(group);
+      return slot;
+    })
+    .filter(Boolean);
 }
 
 /* Members already drawn in the current render pass.
@@ -1461,24 +1596,66 @@ function reserveInlineAncestorSpace() {
     group.style.paddingRight = `${right}px`;
   });
 
-  /* Re-seat the heart on the name row of the cards.
-     The static CSS offset measures up from the row's bottom edge assuming
-     the tallest slot is exactly one card tall. A stack breaks that, so the
-     real card-to-row-bottom distance is used instead. */
-  refs.treeCanvas.querySelectorAll('.couple-row.has-inline-ancestors').forEach((row) => {
-    const hearts = [...row.children].filter((child) => child.classList.contains('couple-heart'));
-    if (!hearts.length) return;
+  alignInlineRows();
+}
 
-    const rowRect = row.getBoundingClientRect();
-    const card = row.querySelector(':scope > .member-card, :scope > .member-with-ancestors > .member-card');
-    if (!card) return;
+/**
+ * Lines up the cards of brothers and sisters in one children row.
+ *
+ * A child whose spouse carries an inline ancestor stack has their card pushed
+ * down by that stack, while a sibling without one stays at the row's top. Each
+ * branch is pushed down so every child's own card shares the same top edge.
+ */
+function alignChildrenRows() {
+  const zoom = zoomLevel || 1;
+  [...refs.treeCanvas.querySelectorAll('.children-row')].reverse().forEach((wrap) => {
+    const branches = [...wrap.querySelectorAll(':scope > .child-branch')];
+    branches.forEach((b) => { b.style.marginTop = ''; });
+    const offsets = branches.map((branch) => {
+      const card = branch.querySelector(
+        ':scope > .couple-row > .member-card, :scope > .couple-row > .member-with-ancestors > .member-card'
+      );
+      return card ? (card.getBoundingClientRect().top - branch.getBoundingClientRect().top) / zoom : 0;
+    });
+    const top = Math.max(0, ...offsets);
+    branches.forEach((branch, i) => {
+      const shift = top - offsets[i];
+      if (shift > 0.5) branch.style.marginTop = `${shift}px`;
+    });
+  });
+}
 
-    const cardRect = card.getBoundingClientRect();
-    const belowCard = (rowRect.bottom - cardRect.bottom) / zoom;
-    hearts.forEach((heart) => {
-      heart.style.marginTop = '0';
-      heart.style.marginBottom =
-        `calc(${belowCard}px + var(--card-h) - var(--couple-line-y) - var(--heart-w) / 2)`;
+/**
+ * Lines up every card in a row that carries an ancestor stack.
+ *
+ * Top-aligned, with each slot pushed down by the stack height, so all cards
+ * (including sibling branches that hang their own children below) share one
+ * top edge. Bottom alignment could not do this: a sibling with children is
+ * taller than a card and would drag every other card down with it.
+ */
+function alignInlineRows() {
+  const zoom = zoomLevel || 1;
+  [...refs.treeCanvas.querySelectorAll('.couple-row.has-inline-ancestors')].reverse().forEach((row) => {
+    row.style.alignItems = 'flex-start';
+    const slots = [...row.children].filter(
+      (child) => !child.matches('.couple-stem, .incoming-drop, .branch-lines')
+    );
+    slots.forEach((slot) => { slot.style.marginTop = ''; slot.style.marginBottom = ''; });
+
+    const offsets = slots.map((slot) => {
+      if (!slot.matches('.member-with-ancestors')) return 0;
+      const card = slot.querySelector(':scope > .member-card');
+      return card ? (card.getBoundingClientRect().top - slot.getBoundingClientRect().top) / zoom : 0;
+    });
+    const top = Math.max(0, ...offsets);
+
+    slots.forEach((slot, i) => {
+      if (slot.classList.contains('couple-heart')) {
+        slot.style.marginTop = `calc(${top}px + var(--couple-line-y) - var(--heart-w) / 2)`;
+        slot.style.marginBottom = '0';
+      } else {
+        slot.style.marginTop = `${top - offsets[i]}px`;
+      }
     });
   });
 }
@@ -1539,6 +1716,44 @@ function alignCoupleAnchors() {
 
     stem.style.setProperty('--stem-x', `${(targetRect.left + targetRect.width / 2
       - (rowRect.left + rowRect.width / 2)) / zoom}px`);
+
+    /* The stem is positioned at the row's bottom edge, but the heart sits
+       higher, on the cards' name line. Lift the stem's top up to the heart's
+       lower edge so the line visibly leaves the heart instead of floating
+       below it. Solo (card) stems already start at the card's bottom. */
+    const lift = target.classList.contains('couple-heart')
+      ? Math.max(0, (rowRect.bottom - targetRect.bottom) / zoom)
+      : 0;
+    stem.style.setProperty('--stem-lift', `${lift}px`);
+  });
+}
+
+/**
+ * Carries the incoming parent line down to the blood member's card.
+ *
+ * A row holding a married-in partner's ancestor stack is bottom-aligned, so
+ * the blood member's card sits at the BOTTOM of a much taller row. The
+ * incoming arrowhead is drawn at the row's top edge, so without this it
+ * lands level with the stack — visually on whichever card of the stack sits
+ * beside it (e.g. pointing at a spouse's mother instead of the real child).
+ */
+function extendIncomingDrops() {
+  const zoom = zoomLevel || 1;
+  refs.treeCanvas.querySelectorAll('.child-branch > .couple-row.has-inline-ancestors').forEach((row) => {
+    row.querySelectorAll(':scope > .incoming-drop').forEach((el) => el.remove());
+    row.style.removeProperty('--incoming-drop');
+
+    const card = findAnchorElement(row, `solo:${row.dataset.bloodId}`);
+    if (!card) return;
+
+    const drop = (card.getBoundingClientRect().top - row.getBoundingClientRect().top) / zoom;
+    if (drop < 1) return;
+
+    const line = document.createElement('div');
+    line.className = 'incoming-drop';
+    line.style.height = `${drop}px`;
+    row.appendChild(line);
+    row.style.setProperty('--incoming-drop', `${drop}px`);
   });
 }
 
@@ -1567,6 +1782,312 @@ function findAnchorElement(row, key) {
     (child) => child.classList.contains('couple-heart')
       && child.dataset.marriageKey === key
   ) || null;
+}
+
+/**
+ * Draws every parent -> children connector from measured geometry.
+ *
+ * One SVG per family-group, rebuilt on every render. For each marriage:
+ *   stem   : heart (or solo parent card) bottom  -> bus line
+ *   bus    : horizontal, spanning the stem and every child of that marriage
+ *   drops  : bus -> top of each child's own card, ending in an arrowhead
+ * Because every segment is computed from the same measured points, they
+ * always meet, whatever the number of children or their subtree widths.
+ */
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/* ---------------------------------------------------------------
+ * Branch colours + click-to-isolate
+ *
+ * Every parent -> children connector gets its own colour, stepped round
+ * the hue wheel by the golden angle so neighbouring branches always differ
+ * strongly, even where their lines cross or run side by side.
+ *
+ * Clicking a branch line isolates it: only that line and the cards it
+ * joins stay visible, everything else is faded. Clicking anywhere else
+ * (another line, empty canvas) shows the whole tree again.
+ * ------------------------------------------------------------- */
+let branchCounter = 0;
+let branchElements = new Map();
+let isolatedBranchId = null;
+
+/* The source of a line is a heart (couple) or a single card; for a heart the
+   two partner cards beside it are the parents. */
+function parentEndpoints(source) {
+  if (!source) return [];
+  const out = [source];
+  if (!source.classList.contains('member-card')) {
+    [source.previousElementSibling, source.nextElementSibling].forEach((el) => {
+      if (!el) return;
+      // A partner carrying an inline ancestor stack is wrapped one level down.
+      const card = el.classList.contains('member-card') ? el : el.querySelector(':scope > .member-card');
+      if (card) out.push(card);
+    });
+  }
+  return out;
+}
+
+function nextBranchColor() {
+  const hue = Math.round((branchCounter * 137.508) % 360);
+  return `hsl(${hue}, 70%, 42%)`;
+}
+
+function clearBranchIsolation() {
+  isolatedBranchId = null;
+  refs.treeCanvas.classList.remove('branch-isolated');
+  refs.treeCanvas.querySelectorAll('.branch-focus').forEach((el) => el.classList.remove('branch-focus'));
+}
+
+function isolateBranch(id) {
+  clearBranchIsolation();
+  const entry = branchElements.get(id);
+  if (!entry) return;
+  isolatedBranchId = id;
+  refs.treeCanvas.classList.add('branch-isolated');
+  entry.forEach((el) => {
+    el.classList.add('branch-focus');
+    // A card is only readable if the row holding it is visible too.
+    const card = el.closest && el.closest('.member-card');
+    if (card) card.classList.add('branch-focus');
+  });
+}
+
+/* Appends one branch (line + arrowheads) to `svg` and registers the cards
+   it connects so the branch can be isolated on click. */
+function appendBranch(svg, d, targets, color, endpoints) {
+  branchCounter += 1;
+  const id = `b${branchCounter}`;
+  const g = document.createElementNS(SVG_NS, 'g');
+  g.setAttribute('class', 'branch-path');
+  g.dataset.branchId = id;
+
+  // Wide transparent stroke: a 2px line is too thin to click reliably.
+  const hit = document.createElementNS(SVG_NS, 'path');
+  hit.setAttribute('d', d);
+  hit.setAttribute('class', 'branch-hit');
+  g.appendChild(hit);
+
+  const path = document.createElementNS(SVG_NS, 'path');
+  path.setAttribute('d', d);
+  path.setAttribute('fill', 'none');
+  path.setAttribute('stroke', color);
+  path.setAttribute('stroke-width', '2');
+  path.setAttribute('stroke-linecap', 'square');
+  g.appendChild(path);
+
+  targets.forEach((t) => {
+    const arrow = document.createElementNS(SVG_NS, 'path');
+    arrow.setAttribute('d', `M${t.x - 5} ${t.y - 8}H${t.x + 5}L${t.x} ${t.y}Z`);
+    arrow.setAttribute('fill', color);
+    g.appendChild(arrow);
+  });
+
+  g.addEventListener('click', (event) => {
+    event.stopPropagation();
+    if (isolatedBranchId) clearBranchIsolation();
+    else isolateBranch(id);
+  });
+
+  svg.appendChild(g);
+  branchElements.set(id, [g, ...endpoints.filter(Boolean)]);
+}
+
+/* Listened on the stage, not the canvas: drag-to-pan captures the pointer
+   on the stage, so empty-space clicks are delivered there. A drag that
+   actually panned is not treated as a click. */
+let branchPressPoint = null;
+refs.treeRoot.addEventListener('pointerdown', (event) => {
+  branchPressPoint = { x: event.clientX, y: event.clientY };
+});
+refs.treeRoot.addEventListener('click', (event) => {
+  if (!isolatedBranchId) return;
+  if (event.target.closest('.branch-path')) return;
+  if (branchPressPoint
+    && Math.hypot(event.clientX - branchPressPoint.x, event.clientY - branchPressPoint.y) > 4) return;
+  clearBranchIsolation();
+});
+
+function drawBranchConnectors() {
+  const zoom = zoomLevel || 1;
+  refs.treeCanvas.querySelectorAll('.branch-lines').forEach((el) => el.remove());
+  clearBranchIsolation();
+  branchCounter = 0;
+  branchElements = new Map();
+
+  refs.treeCanvas.querySelectorAll('.family-group').forEach((group) => {
+    const row = group.querySelector(':scope > .couple-row');
+    const childrenWrap = group.querySelector(':scope > .children-row');
+    if (!row || !childrenWrap) return;
+
+    const stems = [...row.querySelectorAll(':scope > .couple-stem')];
+    if (!stems.length) return;
+
+    const groupRect = group.getBoundingClientRect();
+    if (!groupRect.width) return;
+    const toX = (x) => (x - groupRect.left) / zoom;
+    const toY = (y) => (y - groupRect.top) / zoom;
+
+    const wrapRect = childrenWrap.getBoundingClientRect();
+    const gap = parseFloat(getComputedStyle(childrenWrap).paddingTop) || 14;
+    // Bus sits in the middle of the space between the parents and children.
+    const busY = toY(wrapRect.top) + gap;
+
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('class', 'branch-lines');
+    svg.setAttribute('width', String(groupRect.width / zoom));
+    svg.setAttribute('height', String(groupRect.height / zoom));
+
+    stems.forEach((stem, index) => {
+      const source = findAnchorElement(row, stem.dataset.groupKey);
+      if (!source) return;
+      const srcRect = source.getBoundingClientRect();
+      const sx = toX(srcRect.left + srcRect.width / 2);
+      const sy = toY(srcRect.bottom);
+
+      const targets = [...childrenWrap.children]
+        .filter((branch) => branch.dataset.groupKey === stem.dataset.groupKey)
+        .map((branch) => {
+          const childRow = branch.querySelector(':scope > .couple-row');
+          const card = childRow && findAnchorElement(childRow, childRow.dataset.anchorKey);
+          if (!card) return null;
+          const r = card.getBoundingClientRect();
+          return { x: toX(r.left + r.width / 2), y: toY(r.top), el: card };
+        })
+        .filter(Boolean);
+
+      // Children drawn elsewhere in the tree (beside a spouse from another
+      // branch): the bus is extended to their single existing card.
+      const remoteRoutes = [];
+      (stem.dataset.remoteIds ? stem.dataset.remoteIds.split(',') : []).forEach((id) => {
+        const card = group.querySelector(`.member-card[data-member-id="${CSS.escape(id)}"]`);
+        if (!card) return;
+        const r = card.getBoundingClientRect();
+        const tx = toX(r.left + r.width / 2);
+        const ty = toY(r.top);
+        /* The card sits a generation lower, inside a sibling's branch. A
+           straight drop would run through that sibling's own card, so the
+           line travels down the gap beside that branch, then across just
+           above the card. */
+        /* Pick the vertical lane from the REAL card/heart positions: the
+           target's own x when nothing is in the way (a straight drop),
+           otherwise the gap closest to it. Using the branch box edge
+           sent the line to padding far from any card, which read as a
+           broken connection. */
+        const obstacles = [...group.querySelectorAll('.member-card, .couple-heart')]
+          .filter((el) => el !== card)
+          .map((el) => {
+            const r = el.getBoundingClientRect();
+            return { l: toX(r.left), r: toX(r.right), t: toY(r.top), b: toY(r.bottom) };
+          })
+          .filter((o) => o.r > o.l);
+        const yTop = busY - 10;
+        const yBottom = ty - 12;
+        const clear = (x) => !obstacles.some((o) => x > o.l - 6 && x < o.r + 6
+          && o.b > yTop && o.t < yBottom);
+        const candidates = [tx, ...obstacles.flatMap((o) => [o.l - 10, o.r + 10])]
+          .sort((a, b) => Math.abs(a - tx) - Math.abs(b - tx));
+        const laneX = candidates.find(clear);
+        if (laneX === undefined || Math.abs(laneX - tx) < 0.5) {
+          targets.push({ x: tx, y: ty, el: card });
+          return;
+        }
+        remoteRoutes.push({ laneX, x: tx, y: ty, el: card });
+      });
+      if (!targets.length && !remoteRoutes.length) return;
+
+      // Separate marriages get slightly different bus heights so their
+      // horizontal lines can never merge into one.
+      const y = busY + (stems.length > 1 ? (index - (stems.length - 1) / 2) * 6 : 0);
+      const xs = [sx, ...targets.map((t) => t.x), ...remoteRoutes.map((t) => t.laneX)];
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs);
+
+      let d = `M${sx} ${sy}V${y}`;
+      if (maxX - minX > 0.5) d += `M${minX} ${y}H${maxX}`;
+      targets.forEach((t) => { d += `M${t.x} ${y}V${t.y - 7}`; });
+      remoteRoutes.forEach((t) => {
+        const turnY = t.y - 12;
+        d += `M${t.laneX} ${y}V${turnY}H${t.x}V${t.y - 7}`;
+        targets.push({ x: t.x, y: t.y, el: t.el });
+      });
+
+      appendBranch(svg, d, targets, nextBranchColor(),
+        [...parentEndpoints(source), ...targets.map((t) => t.el)]);
+    });
+
+    if (svg.childNodes.length) group.appendChild(svg);
+  });
+
+  drawInlineConnectors();
+}
+
+/**
+ * Same stem / bus / drops, for married-in parents drawn in an inline stack:
+ * heart -> the partner's card below, plus every sibling slot beside it.
+ */
+function drawInlineConnectors() {
+  const zoom = zoomLevel || 1;
+  const color = getComputedStyle(document.documentElement).getPropertyValue('--connector').trim() || '#7a4ddb';
+
+  refs.treeCanvas.querySelectorAll('.inline-ancestor-row').forEach((row) => {
+    const source = findAnchorElement(row, row.dataset.anchorKey);
+    const stack = row.parentElement;
+    let scope = stack && stack.parentElement;
+    // Side-by-side grand stacks are wrapped; the child row lives one level up.
+    if (scope && scope.classList.contains('inline-ancestor-pair')) scope = scope.parentElement;
+    const host = row.closest('.family-group');
+    const childId = row.dataset.childId;
+    if (!source || !scope || !host || !childId) return;
+
+    const cards = [];
+    const own = scope.querySelector(
+      `:scope > .member-card[data-member-id="${childId}"], :scope > .couple-row > .member-card[data-member-id="${childId}"]`
+    );
+    if (own) cards.push(own);
+
+    /* Sibling slots live in the couple row that holds this column — or, for
+       an ancestor inside a stack, in that ancestor's own couple row. */
+    const coupleRow = scope.matches('.member-with-ancestors')
+      ? scope.parentElement
+      : (own && own.parentElement);
+    if (coupleRow) {
+      coupleRow.querySelectorAll(`:scope > .inline-sibling[data-sibling-of="${childId}"]`).forEach((slot) => {
+        const childRow = slot.querySelector(':scope > .family-group > .couple-row');
+        const card = (childRow && findAnchorElement(childRow, childRow.dataset.anchorKey))
+          || slot.querySelector('.member-card');
+        if (card) cards.push(card);
+      });
+    }
+    if (!cards.length) return;
+
+    const hostRect = host.getBoundingClientRect();
+    const toX = (x) => (x - hostRect.left) / zoom;
+    const toY = (y) => (y - hostRect.top) / zoom;
+
+    const srcRect = source.getBoundingClientRect();
+    const sx = toX(srcRect.left + srcRect.width / 2);
+    const sy = toY(srcRect.bottom);
+    const targets = cards.map((card) => {
+      const r = card.getBoundingClientRect();
+      return { x: toX(r.left + r.width / 2), y: toY(r.top) };
+    });
+    const busY = Math.min(...targets.map((t) => t.y)) - 14;
+    const xs = [sx, ...targets.map((t) => t.x)];
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+
+    let d = `M${sx} ${sy}V${busY}`;
+    if (maxX - minX > 0.5) d += `M${minX} ${busY}H${maxX}`;
+    targets.forEach((t) => { d += `M${t.x} ${busY}V${t.y - 7}`; });
+
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('class', 'branch-lines');
+    svg.setAttribute('width', String(hostRect.width / zoom));
+    svg.setAttribute('height', String(hostRect.height / zoom));
+
+    appendBranch(svg, d, targets, nextBranchColor(), [...parentEndpoints(source), ...cards]);
+    host.appendChild(svg);
+  });
 }
 
 function alignCoupleStems() {
@@ -1604,7 +2125,7 @@ function alignCoupleStems() {
     jog.className = 'couple-stem__jog';
     jog.style.width = `${Math.abs(delta)}px`;
     // Drawn at the bus depth, i.e. the bottom of the stem.
-    jog.style.top = `calc(var(--connector-gap) / 2)`;
+    jog.style.top = `calc(var(--connector-gap) / 2 + var(--stem-lift, 0px))`;
     jog.style.left = delta < 0 ? `${delta}px` : '0px';
     stem.appendChild(jog);
   });
@@ -1717,10 +2238,38 @@ function renderFamilyGroup(member) {
       }
       const column = document.createElement('div');
       column.className = 'member-with-ancestors';
-      const ancestors = renderInlineAncestors(coupleMember);
+      const outward = coupleMembers.indexOf(coupleMember) > coupleMembers.indexOf(member)
+        ? 'right'
+        : 'left';
+      const ancestors = renderInlineAncestors(coupleMember, outward);
+      /* The stack is wider than the card. Centred, it spills over the spouse
+         on the other side of the heart and sits across that spouse's incoming
+         line. Pin it to the inward edge so it only grows outward. */
+      column.classList.add(`grow-${outward}`);
       if (ancestors) column.appendChild(ancestors);
       column.appendChild(renderMemberCard(coupleMember));
-      return column;
+
+      /* Brothers/sisters of the married-in partner. Their parents only exist
+         in the inline stack above, so this is the only place they can be
+         drawn joined to them. Placed on the far side from the spouse so the
+         marriage heart stays between the couple. */
+      const siblings = ancestors ? renderInlineSiblings(coupleMember) : [];
+      if (!siblings.length) return column;
+      const fragment = document.createDocumentFragment();
+      /* Partner on the left of the heart -> siblings go further left;
+         partner on the right -> siblings go further right. The partner's
+         own card must always be the one touching the heart. */
+      const index = coupleMembers.indexOf(coupleMember);
+      const hasSpouseAfter = index < coupleMembers.length - 1
+        && isMarriedTo(coupleMember, coupleMembers[index + 1].id);
+      if (hasSpouseAfter) {
+        siblings.forEach((slot) => fragment.appendChild(slot));
+        fragment.appendChild(column);
+      } else {
+        fragment.appendChild(column);
+        siblings.forEach((slot) => fragment.appendChild(slot));
+      }
+      return fragment;
     });
 
     /* Tint each heart to match the stem and children of the same marriage.
@@ -1741,6 +2290,8 @@ function renderFamilyGroup(member) {
     // and the heart align to the cards rather than to the stack above them.
     if (coupleMembers.some((person) => inlineAncestorFor.has(person.id))) {
       coupleRow.classList.add('has-inline-ancestors');
+      // Lets extendIncomingDrops() find the card the incoming line must reach.
+      coupleRow.dataset.bloodId = member.id;
     }
 
     wrapper.appendChild(coupleRow);
@@ -1762,7 +2313,16 @@ function renderFamilyGroup(member) {
       const tint = tintMap.get(group.key) || '';
       const rendered = [];
 
+      const remote = [];
       group.children.forEach((child) => {
+        /* Already drawn elsewhere (beside a spouse from another branch of
+           the same tree). It must not be drawn twice, but the line from its
+           own parents must still reach it: record it so the connector pass
+           routes this marriage's bus to that existing card. */
+        if (renderedMemberIds.has(child.id)) {
+          remote.push(child.id);
+          return;
+        }
         const childBranch = renderFamilyGroup(child);
         childBranch.classList.add('child-branch');
         // A branch can come back empty under an active search filter, so the
@@ -1774,6 +2334,12 @@ function renderFamilyGroup(member) {
         rendered.push(childBranch);
         childrenWrap.appendChild(childBranch);
       });
+
+      if (remote.length) {
+        wrapper.querySelectorAll(':scope > .couple-row > .couple-stem').forEach((stem) => {
+          if (stem.dataset.groupKey === group.key) stem.dataset.remoteIds = remote.join(',');
+        });
+      }
 
       if (!rendered.length) return;
       if (rendered.length === 1) {
@@ -2044,6 +2610,7 @@ function addMember(event) {
       }
     });
 
+    linkCoParents();
     resetFormMode();
     syncSelectOptions();
     updateJsonOutput();
@@ -2091,6 +2658,7 @@ function addMember(event) {
     }
   }
 
+  linkCoParents();
   resetFormMode();
   refs.form.reset();
   syncSelectOptions();
@@ -2117,6 +2685,7 @@ function adoptMembers(rawMembers) {
     childIds: Array.isArray(member.childIds) ? member.childIds.map(String) : []
   }));
   reconcileSpouseLinks();
+  linkCoParents();
 
   syncSelectOptions();
   updateJsonOutput();
@@ -2742,7 +3311,7 @@ let panState = null;
 
 refs.treeRoot.addEventListener('pointerdown', (event) => {
   if (event.button !== 0) return;
-  if (event.target.closest('button, input, select, textarea, .member-card')) return;
+  if (event.target.closest('button, input, select, textarea, .member-card, .branch-path')) return;
 
   panState = {
     pointerId: event.pointerId,
