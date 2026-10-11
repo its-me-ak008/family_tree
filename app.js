@@ -283,26 +283,88 @@ function getRootMembers() {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function matchesTreeQuery(member) {
-  const query = refs.searchInput.value.trim().toLowerCase();
-  if (!query) return true;
-  return member.name.toLowerCase().includes(query);
+/* ---------------------------------------------------------------
+ * Search
+ *
+ * A branch is drawn when it leads to a match. A branch contains more than
+ * its blood line: a couple row also shows every spouse (usually the wife who
+ * married in) and the inline ancestor stack above that spouse. The old check
+ * looked only at the blood member's own name and blood descendants, so a
+ * married-in member (mostly women) could never be found. Relevance is
+ * computed once per render, with a cache and a cycle guard.
+ * --------------------------------------------------------------- */
+let searchRelevanceCache = new Map();
+
+function getSearchQuery() {
+  return refs.searchInput.value.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
-function hasMatchingDescendant(memberId) {
-  const query = refs.searchInput.value.trim().toLowerCase();
+function nameMatchesQuery(person, query = getSearchQuery()) {
   if (!query) return true;
+  if (!person) return false;
+  const name = String(person.name || '').toLowerCase().replace(/\s+/g, ' ');
+  return name.includes(query);
+}
 
-  const member = getMemberById(memberId);
+function matchesTreeQuery(member) {
+  return nameMatchesQuery(member);
+}
+
+/* True when the inline ancestor stack drawn above `member` (parents,
+   grandparents, and the parents' other children with their own families)
+   contains a match. Used both for relevance and to prune the stack itself,
+   so a search draws only the path to the hit instead of every relative. */
+/* The search "path": every matching member plus all of their ancestors.
+   Only these people are worth drawing — anything else (cousins, in-laws'
+   families, unrelated branches that merely share an ancestor) is noise. */
+let searchPathIds = new Set();
+
+function computeSearchPath() {
+  searchPathIds = new Set();
+  const query = getSearchQuery();
+  if (!query) return;
+  /* Walk straight up ONE line per match: at each step follow the parent with
+     the deeper ancestry. Both parents still appear (they share a couple row),
+     but the other parent's own ancestors, siblings and in-laws are not drawn. */
+  state.members.filter((m) => nameMatchesQuery(m, query)).forEach((match) => {
+    let person = match;
+    while (person && !searchPathIds.has(person.id)) {
+      searchPathIds.add(person.id);
+      const parents = person.parentIds.map(getMemberById).filter(Boolean);
+      if (!parents.length) break;
+      person = parents.reduce((best, p) =>
+        (getAncestorDepth(p.id) > getAncestorDepth(best.id) ? p : best));
+    }
+  });
+}
+
+/* Search roots: the top of each match's line (path members with no parent
+   on the path). The tree is drawn from there, so a match is shown with its
+   own lineage only, not hanging off an unrelated family it married into. */
+function getSearchRoots() {
+  return state.members
+    .filter((m) => searchPathIds.has(m.id)
+      && !m.parentIds.some((id) => searchPathIds.has(id)))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/* The inline stack above `member` is drawn only when one of its parents is
+   on the search path. */
+function inlineStackMatches(member) {
+  if (!getSearchQuery()) return true;
   if (!member) return false;
+  return member.parentIds.some((id) => searchPathIds.has(id));
+}
 
-  if (member.name.toLowerCase().includes(query)) return true;
+function inlineSideMatches(person) {
+  return inlineAncestorFor.has(person.id) && inlineStackMatches(person);
+}
 
-  for (const childId of member.childIds) {
-    if (hasMatchingDescendant(childId)) return true;
-  }
-
-  return false;
+/* During a search, a member's branch is drawn only when that member is on
+   the direct line from the top ancestor to a match. */
+function hasMatchingDescendant(memberId) {
+  if (!getSearchQuery()) return true;
+  return searchPathIds.has(memberId);
 }
 
 /* ---------------------------------------------------------------
@@ -685,8 +747,19 @@ function updateTree() {
   computeInlineAncestors();
   // Fresh pass: nothing has been drawn yet.
   renderedMemberIds = new Set();
+  searchRelevanceCache = new Map();
+  computeSearchPath();
 
-  const roots = getRootMembers();
+  let roots;
+  if (getSearchQuery()) {
+    /* Search view: no married-in parent stacks at all — only the direct
+       line from the top ancestor down to each match. */
+    inlineAncestorIds = new Set();
+    inlineAncestorFor = new Set();
+    roots = getSearchRoots();
+  } else {
+    roots = getRootMembers();
+  }
   if (!roots.length) {
     renderEmptyState();
     applyCentering();
@@ -717,7 +790,7 @@ function updateTree() {
      still undrawn is therefore started as its own root. The once-only guard
      makes this safe: it can only ever recover missing branches, never add a
      duplicate. Skipped during a search, where omissions are intentional. */
-  if (!refs.searchInput.value.trim()) {
+  if (!getSearchQuery()) {
     state.members.forEach((member) => {
       if (renderedMemberIds.has(member.id)) return;
       if (inlineAncestorIds.has(member.id)) return;
@@ -1346,6 +1419,8 @@ function renderInlineAncestors(member, side = 'right') {
   const { father, mother } = getParentsBySex(member);
   const parents = [father, mother].filter(Boolean);
   if (!parents.length) return null;
+  // During a search only stacks that lead to a hit are drawn.
+  if (getSearchQuery() && !inlineStackMatches(member)) return null;
   /* Once-only rule: when two lines share ancestors (e.g. both partners
      descend from the same grandparents), the shared couple is drawn by
      whichever stack reaches it first; every later path stops here instead
@@ -1498,7 +1573,9 @@ function renderInlineSiblings(member) {
     .filter((child) => child.id !== member.id
       && !renderedMemberIds.has(child.id)
       // A sibling who married into another lineage is drawn there instead.
-      && !inlineAncestorFor.has(child.id))
+      && !inlineAncestorFor.has(child.id)
+      // During a search, unrelated aunts/uncles are not drawn.
+      && (!getSearchQuery() || hasMatchingDescendant(child.id)))
     .map((child) => {
       const group = renderFamilyGroup(child);
       if (!group.childElementCount) return null;
@@ -2151,8 +2228,11 @@ function renderFamilyGroup(member) {
     ? coupleMembers.map((item) => item.id)
     : [member.id];
 
-  const query = refs.searchInput.value.trim().toLowerCase();
-  const shouldShowCouple = !query || coupleMembers.some((person) => person.name.toLowerCase().includes(query));
+  const query = getSearchQuery();
+  /* The couple row is always drawn once its branch is relevant: hiding the
+     parents of a match left children floating with no line to them. The
+     branch itself is pruned by hasMatchingDescendant at the caller. */
+  const shouldShowCouple = true;
 
   const unorderedChildren = getDirectChildrenForParentSet(parentIds).filter((child) => !query || hasMatchingDescendant(child.id));
 
@@ -2353,8 +2433,12 @@ function renderFamilyGroup(member) {
     wrapper.appendChild(childrenWrap);
   }
 
-  if (query && !wrapper.textContent.toLowerCase().includes(query)) {
-    return document.createElement('div');
+  // Old check matched against card text (ages, buttons); relevance now comes
+  // from hasMatchingDescendant, so only highlight the actual hits here.
+  if (query) {
+    wrapper.querySelectorAll('.member-card[data-member-id]').forEach((card) => {
+      card.classList.toggle('search-hit', nameMatchesQuery(getMemberById(card.dataset.memberId), query));
+    });
   }
 
   return wrapper;
@@ -3350,7 +3434,12 @@ refs.cancelEditBtn.addEventListener('click', () => {
   resetFormMode();
   closeDrawer();
 });
-refs.searchInput.addEventListener('input', () => updateTree());
+refs.searchInput.addEventListener('input', () => {
+  updateTree();
+  // Bring the first match into view so it isn't lost off-screen.
+  const hit = getSearchQuery() && refs.treeCanvas.querySelector('.member-card.search-hit');
+  if (hit) hit.scrollIntoView({ block: 'center', inline: 'center' });
+});
 refs.collapseAllBtn.addEventListener('click', () => {
   state.members.forEach((member) => {
     state.collapsed[member.id] = true;
