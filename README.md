@@ -26,10 +26,15 @@ request is not reaching `server.js`.
 
 ## Environment
 
-| Variable | Default     | Meaning              |
-| -------- | ----------- | -------------------- |
-| `PORT`   | `4173`      | Listening port       |
-| `HOST`   | `127.0.0.1` | Bind address         |
+| Variable                | Default     | Meaning                          |
+| ----------------------- | ----------- | -------------------------------- |
+| `PORT`                  | `4173`      | Listening port                   |
+| `HOST`                  | `127.0.0.1` | Bind address                     |
+| `FAMILY_TREE_DATA_DIR`  | `./data`    | Where the tree and backups live  |
+
+`FAMILY_TREE_DATA_DIR` exists so the tests can run against a throwaway
+directory. They exercise real writes, and must not be able to reach the real
+store.
 
 The default bind is loopback-only; the server has **no authentication**, so
 only expose it beyond localhost behind something that does.
@@ -71,10 +76,30 @@ client, and **rejects** instead of coercing, so a malformed request cannot
 overwrite a good file. `400` with an explanatory `error` on: non-JSON body, a
 missing `members` array, a member without an `id`, a duplicate `id`, or a
 `spouseIds` / `parentIds` / `childIds` entry pointing at an id that does not
-exist. Bodies over 5 MB get `413`.
+exist.
+
+Bodies over 5 MiB (`MAX_BODY_BYTES`) get `413` with a JSON `error` body, and
+the stored file is left untouched. When `Content-Length` declares the
+violation the request is refused without buffering anything; otherwise the cap
+trips mid-stream. Either way the server drains the remainder of the upload
+before closing — responding and closing immediately would reset the connection
+and destroy the `413` before the client could read it. Draining is bounded to
+2 s and 20 MiB, after which the connection is cut.
 
 Writes are serialised through an internal queue — overlapping saves cannot
 interleave their write/rename steps.
+
+## Tests
+
+```bash
+npm test           # node --test, no dependencies
+```
+
+Covers the body-size limit: that an oversize `PUT` answers a readable `413`
+rather than resetting the connection, that a refusal neither modifies the
+stored file nor consumes a backup slot, that the server keeps serving
+afterwards, and that a large-but-valid tree is still accepted. Tests run
+against a temp directory via `FAMILY_TREE_DATA_DIR`.
 
 ## In the UI
 

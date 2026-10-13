@@ -67,20 +67,15 @@
                 </div>
 
                 <div class="field">
-                  <label class="field-label" for="memberAge">Age</label>
+                  <label class="field-label" for="memberDob">Date of birth</label>
                   <input
-                    id="memberAge"
-                    name="memberAge"
+                    id="memberDob"
+                    name="memberDob"
                     class="control"
-                    type="number"
-                    min="0"
-                    max="130"
-                    step="1"
-                    inputmode="numeric"
-                    placeholder="e.g. 42"
-                    autocomplete="off"
+                    type="date"
+                    autocomplete="bday"
                   />
-                  <p class="field-hint">Optional. Shown in the card details popover.</p>
+                  <p class="field-hint">Optional. Age is calculated automatically.</p>
                 </div>
               </div>
 
@@ -95,6 +90,49 @@
                   <span class="check-label">Deceased</span>
                 </label>
                 <p class="field-hint">Leave unchecked if living. Deceased members appear greyed out in the tree.</p>
+              </div>
+            </section>
+
+            <section class="form-section">
+              <h2 class="form-section-title">Occupation</h2>
+
+              <div class="field">
+                <label class="field-label" for="memberCompany">Company</label>
+                <input
+                  id="memberCompany"
+                  name="memberCompany"
+                  class="control"
+                  type="text"
+                  placeholder="e.g. Zoho"
+                  autocomplete="organization"
+                />
+              </div>
+
+              <div class="field">
+                <label class="field-label" for="memberDesignation">Designation</label>
+                <input
+                  id="memberDesignation"
+                  name="memberDesignation"
+                  class="control"
+                  type="text"
+                  placeholder="e.g. Senior Engineer"
+                  autocomplete="organization-title"
+                />
+              </div>
+
+              <div class="field">
+                <label class="field-label" for="memberSalary">Salary</label>
+                <input
+                  id="memberSalary"
+                  name="memberSalary"
+                  class="control"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  inputmode="decimal"
+                  placeholder="e.g. 75000"
+                  autocomplete="off"
+                />
               </div>
             </section>
 
@@ -140,29 +178,11 @@
             </section>
           </form>
 
-          <section class="form-section json-box">
-            <div class="form-section-head">
-              <h2 class="form-section-title">JSON Data</h2>
-              <button type="button" id="copyJsonBtn" class="btn btn-ghost btn-sm">Copy</button>
-            </div>
-            <textarea id="jsonOutput" class="control" spellcheck="false"></textarea>
-            <div class="json-actions">
-              <button type="button" id="applyJsonBtn" class="btn btn-secondary btn-sm">Apply</button>
-              <button type="button" id="exportJsonBtn" class="btn btn-secondary btn-sm">Export</button>
-              <button type="button" id="importJsonBtn" class="btn btn-secondary btn-sm">Import</button>
-              <input id="jsonFileInput" type="file" accept=".json,application/json" hidden />
-            </div>
-            <div class="json-actions">
-              <button type="button" id="saveServerBtn" class="btn btn-primary btn-sm">Save to Server</button>
-              <button type="button" id="loadServerBtn" class="btn btn-secondary btn-sm">Load from Server</button>
-            </div>
-            <div class="json-status-row">
-              <span id="unsavedBadge" class="unsaved-badge hidden" role="status" aria-live="polite">
-                Unsaved changes
-              </span>
-              <p id="serverStatus" class="json-status" role="status" aria-live="polite"></p>
-            </div>
-          </section>
+          <div class="json-status-row">
+            <span id="unsavedBadge" class="unsaved-badge hidden" role="status" aria-live="polite">
+              Unsaved changes
+            </span>
+          </div>
         </div>
 
         <!-- Pinned footer: primary action stays reachable without scrolling. -->

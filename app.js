@@ -23,7 +23,10 @@ const refs = {
   form: document.getElementById('memberForm'),
   name: document.getElementById('memberName'),
   sex: document.getElementById('memberSex'),
-  age: document.getElementById('memberAge'),
+  dob: document.getElementById('memberDob'),
+  company: document.getElementById('memberCompany'),
+  designation: document.getElementById('memberDesignation'),
+  salary: document.getElementById('memberSalary'),
   deceased: document.getElementById('memberDeceased'),
   spouse: document.getElementById('memberSpouse'),
   father: document.getElementById('memberFather'),
@@ -42,15 +45,6 @@ const refs = {
   searchInput: document.getElementById('memberSearch'),
   collapseAllBtn: document.getElementById('collapseAllBtn'),
   expandAllBtn: document.getElementById('expandAllBtn'),
-  jsonOutput: document.getElementById('jsonOutput'),
-  copyJsonBtn: document.getElementById('copyJsonBtn'),
-  applyJsonBtn: document.getElementById('applyJsonBtn'),
-  exportJsonBtn: document.getElementById('exportJsonBtn'),
-  importJsonBtn: document.getElementById('importJsonBtn'),
-  jsonFileInput: document.getElementById('jsonFileInput'),
-  saveServerBtn: document.getElementById('saveServerBtn'),
-  loadServerBtn: document.getElementById('loadServerBtn'),
-  serverStatus: document.getElementById('serverStatus'),
   unsavedBadge: document.getElementById('unsavedBadge'),
   resetDataBtn: document.getElementById('resetDataBtn'),
   formDrawer: document.getElementById('formDrawer'),
@@ -706,10 +700,6 @@ function setSelectedSpouseIds(ids) {
   });
 }
 
-function updateJsonOutput() {
-  refs.jsonOutput.value = JSON.stringify({ members: state.members }, null, 2);
-}
-
 /* Copy for the "nothing to draw" canvas. Set by the API layer so the same
    blank canvas can explain *why* it is blank — still loading, genuinely empty,
    or a failed request — instead of always claiming there is no data. */
@@ -859,6 +849,61 @@ const AGE_MAX = 130;
 // field apart from a value that was supplied but unusable.
 const INVALID_AGE = Symbol('invalid-age');
 
+function normalizeDob(raw) {
+  const text = String(raw ?? '').trim();
+  if (!text) return '';
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return '';
+
+  const date = new Date(`${text}T12:00:00Z`);
+  if (Number.isNaN(date.getTime())) return '';
+
+  const iso = date.toISOString().slice(0, 10);
+  return iso === text ? text : '';
+}
+
+function normalizeSalary(raw) {
+  const text = String(raw ?? '').trim();
+  if (!text) return '';
+
+  const value = Number(text);
+  if (!Number.isFinite(value) || value < 0) return '';
+  return Number(value.toFixed(2));
+}
+
+function normalizeOccupation(raw) {
+  const base = raw && typeof raw === 'object' && !Array.isArray(raw)
+    ? raw
+    : {
+        company: raw?.company ?? raw?.companyName ?? '',
+        designation: raw?.designation ?? raw?.title ?? '',
+        salary: raw?.salary ?? ''
+      };
+
+  return {
+    company: String(base.company ?? '').trim(),
+    designation: String(base.designation ?? '').trim(),
+    salary: normalizeSalary(base.salary)
+  };
+}
+
+function computeAgeFromDob(dob) {
+  const value = normalizeDob(dob);
+  if (!value) return '';
+
+  const [year, month, day] = value.split('-').map(Number);
+  const birth = new Date(Date.UTC(year, month - 1, day));
+  const today = new Date();
+
+  let age = today.getUTCFullYear() - birth.getUTCFullYear();
+  const monthDiff = today.getUTCMonth() - birth.getUTCMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && today.getUTCDate() < birth.getUTCDate())) {
+    age -= 1;
+  }
+
+  return age >= AGE_MIN && age <= AGE_MAX ? age : '';
+}
+
 /**
  * Form input -> stored value. Blank means "not set" and is stored as ''
  * to match the other optional fields. Anything non-numeric or out of range
@@ -886,6 +931,11 @@ function sanitizeAge(raw) {
   return value === INVALID_AGE ? '' : value;
 }
 
+function sanitizeDob(raw) {
+  const value = normalizeDob(raw);
+  return value || '';
+}
+
 /**
  * Imported/pasted JSON -> stored deceased flag. Older exports predate this
  * field, so a missing value means "living" rather than invalid. Strings are
@@ -897,26 +947,20 @@ function sanitizeDeceased(raw) {
 }
 
 /**
- * Age is optional in the data model. An explicit `age` wins; otherwise a
- * `dob` is converted. Returns null when neither is usable so the popover
+ * Age is optional in the data model. An explicit `dob` wins; otherwise a
+ * `age` value is used. Returns null when neither is usable so the popover
  * can show a placeholder rather than "NaN".
  */
 function getMemberAge(member) {
+  const dobAge = member?.dob ? computeAgeFromDob(member.dob) : '';
+  if (dobAge !== '') return Number(dobAge);
+
   if (member.age !== '' && member.age !== null && member.age !== undefined) {
     const direct = Number(member.age);
     if (!isNaN(direct) && direct >= 0) return Math.floor(direct);
   }
 
-  if (!member.dob) return null;
-  const born = new Date(member.dob);
-  if (isNaN(born.getTime())) return null;
-
-  const now = new Date();
-  let age = now.getFullYear() - born.getFullYear();
-  // Birthday not yet reached this year.
-  const monthDiff = now.getMonth() - born.getMonth();
-  if (monthDiff < 0 || (monthDiff === 0 && now.getDate() < born.getDate())) age -= 1;
-  return age >= 0 ? age : null;
+  return null;
 }
 
 /* ---- floating layer (popover + menu) ---- */
@@ -2470,7 +2514,10 @@ function prepareQuickAddChildForm(memberId) {
   resetFormMode();
   refs.name.value = '';
   refs.sex.value = 'male';
-  refs.age.value = '';
+  refs.dob.value = '';
+  refs.company.value = '';
+  refs.designation.value = '';
+  refs.salary.value = '';
   refs.deceased.checked = false;
   setSelectedSpouseIds([]);
   // Route the clicked member and their spouse into the slot matching each
@@ -2510,7 +2557,10 @@ function prepareQuickAddParentForm(memberId, slot) {
 
   refs.name.value = '';
   refs.sex.value = slot === 'father' ? 'male' : 'female';
-  refs.age.value = '';
+  refs.dob.value = '';
+  refs.company.value = '';
+  refs.designation.value = '';
+  refs.salary.value = '';
   refs.deceased.checked = false;
 
   // The opposite slot, if already filled, is this new parent's partner. Any
@@ -2549,7 +2599,10 @@ function prepareQuickAddSpouseForm(memberId) {
   // 'other' has no opposite so it is left on the form's own default.
   if (member.sex === 'male') refs.sex.value = 'female';
   else if (member.sex === 'female') refs.sex.value = 'male';
-  refs.age.value = '';
+  refs.dob.value = '';
+  refs.company.value = '';
+  refs.designation.value = '';
+  refs.salary.value = '';
   refs.deceased.checked = false;
 
   // Sync before assigning: the options must exist or nothing can be ticked.
@@ -2577,11 +2630,10 @@ function populateFormForMember(memberId) {
   syncSelectOptions();
   refs.name.value = member.name;
   refs.sex.value = member.sex;
-  // Age is optional, so an absent value must clear the input rather than
-  // render "undefined" or leave the previous member's age behind.
-  refs.age.value = member.age === '' || member.age === null || member.age === undefined
-    ? ''
-    : member.age;
+  refs.dob.value = member.dob || '';
+  refs.company.value = member.occupation?.company || '';
+  refs.designation.value = member.occupation?.designation || '';
+  refs.salary.value = member.occupation?.salary ?? '';
   refs.deceased.checked = !!member.deceased;
   setSelectedSpouseIds(getSpouseIds(member));
   const { father, mother } = getParentsBySex(member);
@@ -2619,7 +2671,6 @@ function removeMember(memberId) {
   }
 
   syncSelectOptions();
-  updateJsonOutput();
   updateTree();
   markDirty();
 }
@@ -2629,7 +2680,13 @@ function addMember(event) {
 
   const name = refs.name.value.trim();
   const sex = refs.sex.value;
-  const age = normalizeAge(refs.age.value);
+  const dob = normalizeDob(refs.dob.value);
+  const age = dob ? computeAgeFromDob(dob) : '';
+  const occupation = normalizeOccupation({
+    company: refs.company.value,
+    designation: refs.designation.value,
+    salary: refs.salary.value
+  });
   const deceased = refs.deceased.checked;
   const spouseIds = getSelectedSpouseIds();
   const fatherId = refs.father.value || '';
@@ -2640,11 +2697,9 @@ function addMember(event) {
     return;
   }
 
-  // `type="number"` already blocks most junk, but a pasted or out-of-range
-  // value still reaches us; reject it here instead of storing a bad age.
-  if (age === INVALID_AGE) {
-    refs.age.focus();
-    refs.age.reportValidity();
+  if (refs.dob.value && !dob) {
+    refs.dob.focus();
+    refs.dob.reportValidity();
     return;
   }
 
@@ -2666,7 +2721,9 @@ function addMember(event) {
 
     memberToUpdate.name = name;
     memberToUpdate.sex = sex;
+    memberToUpdate.dob = dob;
     memberToUpdate.age = age;
+    memberToUpdate.occupation = occupation;
     memberToUpdate.deceased = deceased;
     // Father first by convention; getParentsBySex() resolves by sex, so the
     // order is presentational rather than load-bearing.
@@ -2697,7 +2754,6 @@ function addMember(event) {
     linkCoParents();
     resetFormMode();
     syncSelectOptions();
-    updateJsonOutput();
     updateTree();
     markDirty();
     closeDrawer();
@@ -2708,7 +2764,9 @@ function addMember(event) {
     id: `member-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
     name,
     sex,
+    dob,
     age,
+    occupation,
     deceased,
     spouseIds: [],
     parentIds: [fatherId, motherId].filter(Boolean),
@@ -2746,7 +2804,6 @@ function addMember(event) {
   resetFormMode();
   refs.form.reset();
   syncSelectOptions();
-  updateJsonOutput();
   updateTree();
   markDirty();
   closeDrawer();
@@ -2758,44 +2815,34 @@ function addMember(event) {
  * load). Kept in one place so the three paths cannot drift apart.
  */
 function adoptMembers(rawMembers) {
-  state.members = rawMembers.map((member) => ({
-    id: String(member.id || `member-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`),
-    name: String(member.name || 'Unknown'),
-    sex: ['male', 'female', 'other'].includes(member.sex) ? member.sex : 'other',
-    age: sanitizeAge(member.age),
-    deceased: sanitizeDeceased(member.deceased),
-    spouseIds: sanitizeSpouseIds(member),
-    parentIds: Array.isArray(member.parentIds) ? member.parentIds.map(String) : [],
-    childIds: Array.isArray(member.childIds) ? member.childIds.map(String) : []
-  }));
+  state.members = rawMembers.map((member) => {
+    const dob = sanitizeDob(member.dob || member.dateOfBirth);
+    const age = dob ? computeAgeFromDob(dob) : sanitizeAge(member.age);
+    const occupation = normalizeOccupation(
+      member.occupation || {
+        company: member.company || '',
+        designation: member.designation || '',
+        salary: member.salary || ''
+      }
+    );
+    return {
+      id: String(member.id || `member-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`),
+      name: String(member.name || 'Unknown'),
+      sex: ['male', 'female', 'other'].includes(member.sex) ? member.sex : 'other',
+      dob,
+      age,
+      occupation,
+      deceased: sanitizeDeceased(member.deceased),
+      spouseIds: sanitizeSpouseIds(member),
+      parentIds: Array.isArray(member.parentIds) ? member.parentIds.map(String) : [],
+      childIds: Array.isArray(member.childIds) ? member.childIds.map(String) : []
+    };
+  });
   reconcileSpouseLinks();
   linkCoParents();
 
   syncSelectOptions();
-  updateJsonOutput();
   updateTree();
-}
-
-function applyJsonData() {
-  const raw = refs.jsonOutput.value.trim();
-
-  if (!raw) {
-    return;
-  }
-
-  try {
-    const parsed = JSON.parse(raw);
-
-    if (!parsed || !Array.isArray(parsed.members)) {
-      alert('JSON must have a members array.');
-      return;
-    }
-
-    adoptMembers(parsed.members);
-    markDirty();
-  } catch (error) {
-    alert('Invalid JSON format. Please check the structure and try again.');
-  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -2901,9 +2948,7 @@ function renderUnsavedBadge() {
 }
 
 function setServerStatus(message, tone = 'info') {
-  if (!refs.serverStatus) return;
-  refs.serverStatus.textContent = message;
-  refs.serverStatus.dataset.tone = tone;
+  return;
 }
 
 /** Pulls the server's error text out, falling back to the HTTP status. */
@@ -3002,10 +3047,6 @@ async function bootstrapFromServer() {
   setTreeLoading(true);
   setEmptyStateView(EMPTY_STATE.LOADING);
   setServerStatus('Loading family data…');
-  // Both server buttons would act on a tree that is about to be replaced.
-  refs.loadServerBtn.disabled = true;
-  refs.saveServerBtn.disabled = true;
-
   try {
     const response = await fetch(SERVER_API);
 
@@ -3037,8 +3078,6 @@ async function bootstrapFromServer() {
     setServerStatus('Could not reach the server. Is `npm start` running?', 'error');
   } finally {
     setTreeLoading(false);
-    refs.loadServerBtn.disabled = false;
-    refs.saveServerBtn.disabled = false;
   }
 }
 
@@ -3050,56 +3089,6 @@ function setTreeLoading(isLoading) {
   if (!refs.treeRoot) return;
   refs.treeRoot.classList.toggle('is-loading', isLoading);
   refs.treeRoot.setAttribute('aria-busy', isLoading ? 'true' : 'false');
-}
-
-async function copyJson() {
-  try {
-    await navigator.clipboard.writeText(refs.jsonOutput.value);
-    refs.copyJsonBtn.textContent = 'Copied';
-    setTimeout(() => {
-      refs.copyJsonBtn.textContent = 'Copy';
-    }, 1200);
-  } catch (error) {
-    refs.copyJsonBtn.textContent = 'Copy failed';
-    setTimeout(() => {
-      refs.copyJsonBtn.textContent = 'Copy';
-    }, 1200);
-  }
-}
-
-function exportJsonFile() {
-  const jsonText = refs.jsonOutput.value || JSON.stringify({ members: state.members }, null, 2);
-  const blob = new Blob([jsonText], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = 'family-tree.json';
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-}
-
-function importJsonFile(file) {
-  if (!file) return;
-
-  const reader = new FileReader();
-  reader.onload = (event) => {
-    try {
-      const parsed = JSON.parse(event.target.result);
-      if (!parsed || !Array.isArray(parsed.members)) {
-        alert('JSON file must contain a members array.');
-        return;
-      }
-
-      adoptMembers(parsed.members);
-      markDirty();
-      refs.jsonFileInput.value = '';
-    } catch (error) {
-      alert('Unable to parse this JSON file.');
-    }
-  };
-  reader.readAsText(file);
 }
 
 /**
@@ -3115,7 +3104,6 @@ function clearAllData() {
   state.collapsed = {};
   setEmptyStateView(EMPTY_STATE.NONE);
   syncSelectOptions();
-  updateJsonOutput();
   updateTree();
   /* Clearing throws away whatever was on screen; the server still holds the
      old tree, so this counts as unsaved until explicitly pushed. */
@@ -3452,13 +3440,6 @@ refs.expandAllBtn.addEventListener('click', () => {
   });
   updateTree();
 });
-refs.applyJsonBtn.addEventListener('click', applyJsonData);
-refs.copyJsonBtn.addEventListener('click', copyJson);
-refs.exportJsonBtn.addEventListener('click', exportJsonFile);
-refs.importJsonBtn.addEventListener('click', () => refs.jsonFileInput.click());
-refs.jsonFileInput.addEventListener('change', (event) => importJsonFile(event.target.files[0]));
-refs.saveServerBtn.addEventListener('click', saveToServer);
-refs.loadServerBtn.addEventListener('click', loadFromServer);
 refs.resetDataBtn.addEventListener('click', () => {
   resetFormMode();
   clearAllData();
@@ -3481,7 +3462,6 @@ window.addEventListener('beforeunload', (event) => {
 
 resetFormMode();
 syncSelectOptions();
-updateJsonOutput();
 updateTree();
 renderUnsavedBadge();
 
